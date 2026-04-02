@@ -1,0 +1,10 @@
+[project]
+name = "ift6765"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pandas>=3.0.2",
+    "pyarrow>=23.0.1",
+]
