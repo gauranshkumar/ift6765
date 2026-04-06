@@ -18,8 +18,8 @@ set -o pipefail  # Exit on pipe failure
 # ==========================================================
 # Configuration
 # ==========================================================
-# We use a very small model for testing to avoid huge downloads and long loading times
-MODEL_NAME=${VLLM_MODEL:-"facebook/opt-125m"}
+# Qwen2-0.5B: smallest Qwen2 model, ~1 GB, same family as production, fully supported by vLLM
+MODEL_NAME=${VLLM_MODEL:-"Qwen/Qwen2-0.5B"}
 DOWNLOAD_DIR="/scratch/gauransh/hf_models"
 TMP_DIR="${SLURM_TMPDIR:-/tmp/vllm_test_$$}"
 
@@ -121,7 +121,7 @@ import sys
 from vllm import LLM, SamplingParams
 
 # Get model name from environment or use default
-model_name = os.environ.get("VLLM_MODEL_NAME", "facebook/opt-125m")
+model_name = os.environ.get("VLLM_MODEL_NAME", "Qwen/Qwen2-0.5B")
 
 print(f"[TEST] Loading model {model_name}...")
 try:
