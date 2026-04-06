@@ -86,7 +86,16 @@ pip install --no-index pyarrow pandas || pip install pyarrow pandas
 pip install --no-index tqdm || pip install tqdm
 
 # ==========================================================
-# 3b) MIG UUID remapping
+# 3b) vLLM engine selection
+# ==========================================================
+# vLLM v1 engine's topk_topp_triton.py mixes uint32/int32 in a Triton
+# kernel division, which Triton 3.0.0's stricter compiler rejects with:
+#   "Cannot use // with triton.language.uint32 and triton.language.int32"
+# Force the v0 engine which uses a plain PyTorch sampler path instead.
+export VLLM_USE_V1=0
+
+# ==========================================================
+# 3c) MIG UUID remapping
 # ==========================================================
 # vLLM calls int() on CUDA_VISIBLE_DEVICES entries; MIG UUIDs like
 # "MIG-f0fb8b1e-..." are not integers and cause a ValueError in
@@ -102,6 +111,7 @@ fi
 
 # ==========================================================
 # 4) Basic Validation
+
 # ==========================================================
 echo "[INFO] Validating basic imports and CUDA..."
 python - << 'EOF'
