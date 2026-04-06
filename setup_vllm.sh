@@ -73,14 +73,11 @@ echo "[INFO] Installing PyTorch from Compute Canada wheels..."
 pip install --no-index torch torchvision torchaudio
 
 # ==========================================================
-# 4) Fix Triton version for PyTorch 2.4+ + vLLM
+# 4) Install vLLM (brings its own compatible Triton)
 # ==========================================================
-echo "[INFO] Installing compatible Triton version..."
-pip install --upgrade "triton==3.0.0"
-
-# ==========================================================
-# 5) Install vLLM
-# ==========================================================
+# Do NOT pre-install a pinned Triton. vLLM pins its own Triton dependency
+# internally; overriding it causes kernel type-checking failures (e.g.
+# uint32/int32 signedness errors in topk_topp_triton.py).
 echo "[INFO] Installing vLLM..."
 pip install "vllm>=0.5.1"
 

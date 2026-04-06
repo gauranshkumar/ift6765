@@ -59,6 +59,9 @@ fi
 echo "[INFO] Creating virtual environment at $TMP_DIR..."
 mkdir -p "$TMP_DIR"
 ENV_DIR="$TMP_DIR/vllm-test-env"
+# Always start clean so stale package versions (e.g. a previously pinned
+# Triton) do not carry over from a prior run in the same SLURM_TMPDIR.
+rm -rf "$ENV_DIR"
 python3 -m venv "$ENV_DIR"
 
 # Activate venv
@@ -75,10 +78,7 @@ echo "[INFO] Installing PyTorch..."
 # On compute canada this uses local wheels if available
 pip install --no-index torch torchvision torchaudio || pip install torch torchvision torchaudio
 
-echo "[INFO] Installing compatible Triton version..."
-pip install --upgrade "triton==3.0.0"
-
-echo "[INFO] Installing vLLM..."
+echo "[INFO] Installing vLLM (brings its own compatible Triton)..."
 pip install "vllm>=0.5.1"
 
 echo "[INFO] Installing dependencies from run_tikz2uml.sh..."
