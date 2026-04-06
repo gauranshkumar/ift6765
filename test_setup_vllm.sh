@@ -86,6 +86,21 @@ pip install --no-index pyarrow pandas || pip install pyarrow pandas
 pip install --no-index tqdm || pip install tqdm
 
 # ==========================================================
+# 3b) MIG UUID remapping
+# ==========================================================
+# vLLM calls int() on CUDA_VISIBLE_DEVICES entries; MIG UUIDs like
+# "MIG-f0fb8b1e-..." are not integers and cause a ValueError in
+# vllm/platforms/cuda.py:device_id_to_physical_device_id.
+# Remap each UUID to its ordinal index (0, 1, 2, ...) so vLLM
+# receives plain integers while SLURM still isolates the right GPU.
+if echo "${CUDA_VISIBLE_DEVICES:-}" | grep -q "MIG-"; then
+    NUM_DEVS=$(echo "$CUDA_VISIBLE_DEVICES" | tr ',' '\n' | wc -l | tr -d ' ')
+    NEW_IDS=$(seq -s',' 0 $((NUM_DEVS - 1)))
+    export CUDA_VISIBLE_DEVICES="$NEW_IDS"
+    echo "[INFO] MIG UUIDs detected — remapped CUDA_VISIBLE_DEVICES to: $CUDA_VISIBLE_DEVICES"
+fi
+
+# ==========================================================
 # 4) Basic Validation
 # ==========================================================
 echo "[INFO] Validating basic imports and CUDA..."
