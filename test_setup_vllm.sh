@@ -19,7 +19,7 @@ set -o pipefail  # Exit on pipe failure
 # Configuration
 # ==========================================================
 # SmolLM-135M: 135 MB, uses LlamaForCausalLM — supported in all vLLM versions including 0.5.x
-MODEL_NAME=${VLLM_MODEL:-"HuggingFaceTB/SmolLM-135M"}
+MODEL_NAME=${VLLM_MODEL:-"HuggingFaceTB/SmolLM-135M-Instruct"}
 DOWNLOAD_DIR="/scratch/gauransh/hf_models"
 TMP_DIR="${SLURM_TMPDIR:-/tmp/vllm_test_$$}"
 
@@ -146,7 +146,7 @@ import sys
 from vllm import LLM, SamplingParams
 
 # Get model name from environment or use default
-model_name = os.environ.get("VLLM_MODEL_NAME", "HuggingFaceTB/SmolLM-135M")
+model_name = os.environ.get("VLLM_MODEL_NAME", "HuggingFaceTB/SmolLM-135M-Instruct")
 
 print(f"[TEST] Loading model {model_name}...")
 try:

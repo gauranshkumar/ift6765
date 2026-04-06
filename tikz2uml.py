@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 import glob
 import json
@@ -18,7 +19,8 @@ MODEL_NAME       = "Qwen/Qwen3-Coder-Next"          # ← replace with your vLLM
 OUTPUT_PATH      = "/project/def-syriani/gauransh/ift6765/data/output_with_uml.parquet"
 REQUEST_TIMEOUT  = 60                          # seconds per LLM call
 PLANTUML_SERVER  = "https://www.plantuml.com/plantuml"
-MAX_WORKERS      = 16                          # concurrent vLLM requests
+MAX_WORKERS      = 8                           # concurrent vLLM requests per batch
+BATCH_SIZE       = 64                          # rows submitted to the server at once
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -68,7 +70,7 @@ def call_vllm(tikz_code: str) -> str | None:
             {"role": "user",   "content": build_user_prompt(tikz_code)},
         ],
         "temperature": 0.0,
-        "max_tokens":  1024,
+        "max_tokens":  8192,
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -81,7 +83,10 @@ def call_vllm(tikz_code: str) -> str | None:
     try:
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
             body = json.loads(resp.read().decode("utf-8"))
-            return body["choices"][0]["message"]["content"].strip()
+            content = body["choices"][0]["message"]["content"]
+            # Strip any residual <think>…</think> block (safety net for Qwen3)
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+            return content.strip()
     except urllib.error.URLError as e:
         log.error(f"vLLM connection error: {e.reason}")
     except (KeyError, IndexError, json.JSONDecodeError) as e:
@@ -148,19 +153,27 @@ def main():
     df = pd.read_parquet(train_files, columns=["tikz_code"])
     log.info(f"Loaded {df.shape[0]} rows.")
 
-    # ── Process each row ──────────────────────────────────────────────────────
+    # ── Process in batches to avoid overloading the vLLM server ──────────────
     tikz_codes = df["tikz_code"].tolist()
     results = [None] * len(tikz_codes)
+    n_batches = (len(tikz_codes) + BATCH_SIZE - 1) // BATCH_SIZE
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {
-            executor.submit(process_row, str(code)): i
-            for i, code in enumerate(tikz_codes)
-        }
-        with tqdm(total=len(futures), desc="Converting TikZ → UML") as pbar:
-            for future in as_completed(futures):
-                results[futures[future]] = future.result()
-                pbar.update(1)
+    with tqdm(total=len(tikz_codes), desc="Converting TikZ → UML") as pbar:
+        for batch_idx in range(n_batches):
+            start = batch_idx * BATCH_SIZE
+            end   = min(start + BATCH_SIZE, len(tikz_codes))
+            batch = tikz_codes[start:end]
+
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                futures = {
+                    executor.submit(process_row, str(code)): start + i
+                    for i, code in enumerate(batch)
+                }
+                for future in as_completed(futures):
+                    results[futures[future]] = future.result()
+                    pbar.update(1)
+
+            log.info(f"Batch {batch_idx + 1}/{n_batches} done ({end}/{len(tikz_codes)} rows)")
 
     # ── Merge results into DataFrame ──────────────────────────────────────────
     results_df = pd.DataFrame(results, index=df.index)
