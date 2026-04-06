@@ -15,7 +15,7 @@ from utils.UML import PlantUMLWebValidator
 
 VLLM_ENDPOINT   = "http://localhost:8000/v1/chat/completions"
 MODEL_NAME       = "Qwen/Qwen3-Coder-Next"          # ← replace with your vLLM model
-OUTPUT_PATH      = "data/output_with_uml.parquet"
+OUTPUT_PATH      = "/project/def-syriani/gauransh/ift6765/data/output_with_uml.parquet"
 REQUEST_TIMEOUT  = 60                          # seconds per LLM call
 PLANTUML_SERVER  = "https://www.plantuml.com/plantuml"
 MAX_WORKERS      = 16                          # concurrent vLLM requests
@@ -29,7 +29,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("conversion.log", encoding="utf-8"),
+        logging.FileHandler("/scratch/gauransh/logs/conversion.log", encoding="utf-8"),
     ],
 )
 log = logging.getLogger(__name__)
@@ -104,12 +104,14 @@ def process_row(tikz_code: str) -> dict:
       uml_valid       - True / False
       uml_error       - error message string, empty if valid
     """
-    result = {"uml_code": "", "uml_valid": False, "uml_error": ""}
+    result = {"uml_code": "", "uml_valid": False, "uml_error": "", "llm_failed": False}
 
     # ── 1. LLM conversion ────────────────────────────────────────────────────
     uml_code = call_vllm(tikz_code)
     if uml_code is None:
-        result["uml_error"] = "LLM call failed — see conversion.log"
+        result["uml_valid"]  = False
+        result["llm_failed"] = True
+        result["uml_error"]  = "LLM call failed — see conversion.log"
         log.warning("Skipping validation: LLM did not return output.")
         return result
 
@@ -137,9 +139,9 @@ def process_row(tikz_code: str) -> dict:
 
 def main():
     # ── Load data ─────────────────────────────────────────────────────────────
-    train_files = glob.glob("data/*.parquet")
+    train_files = glob.glob("/project/def-syriani/gauransh/ift6765/data/*.parquet")
     if not train_files:
-        log.error("No parquet files found in data/")
+        log.error("No parquet files found in /project/def-syriani/gauransh/ift6765/data/")
         return
 
     log.info(f"Loading {len(train_files)} parquet file(s)...")
@@ -165,23 +167,23 @@ def main():
     df = pd.concat([df, results_df], axis=1)
 
     # ── Summary ───────────────────────────────────────────────────────────────
-    total   = len(df)
-    valid   = df["uml_valid"].sum()
-    invalid = total - valid
-    llm_failures = (df["uml_code"] == "").sum()
+    total        = len(df)
+    valid        = df["uml_valid"].sum()
+    llm_failures = df["llm_failed"].sum()
+    uml_invalid  = total - valid - llm_failures
 
     log.info("─" * 50)
     log.info(f"Total rows      : {total}")
     log.info(f"LLM failures    : {llm_failures}")
+    log.info(f"UML invalid     : {uml_invalid}")
     log.info(f"UML valid       : {valid}  ({100*valid/total:.1f}%)")
-    log.info(f"UML invalid     : {invalid - llm_failures}")
     log.info("─" * 50)
 
     # ── Save ──────────────────────────────────────────────────────────────────
     df.to_parquet(OUTPUT_PATH, index=False)
     log.info(f"Saved to {OUTPUT_PATH}")
 
-    print(df[["tikz_code", "uml_code", "uml_valid", "uml_error"]].head())
+    print(df[["tikz_code", "uml_code", "uml_valid", "llm_failed", "uml_error"]].head())
 
 
 if __name__ == "__main__":

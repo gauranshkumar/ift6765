@@ -168,6 +168,14 @@ class PlantUMLWebValidator:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 content_type = resp.headers.get("Content-Type", "")
                 png_data = resp.read()
+        except urllib.error.HTTPError as e:
+            if e.code == 400:
+                result["errors"].append(
+                    "PlantUML server rejected the diagram (HTTP 400) — syntax error in UML source"
+                )
+            else:
+                result["errors"].append(f"PlantUML server returned HTTP {e.code}: {e.reason}")
+            return result
         except urllib.error.URLError as e:
             result["errors"].append(
                 f"Cannot reach PlantUML server at {self.server}: {e.reason}\n"
