@@ -45,7 +45,7 @@ module load StdEnv/2023
 module load cuda/12.2
 module load python/3.11
 module load gcc
-module load opencv
+module load opencv || true
 
 echo "[INFO] Job running on: $(hostname)"
 echo "[INFO] SLURM_TMPDIR: $SLURM_TMPDIR"
@@ -56,10 +56,10 @@ echo "[INFO] Available GPUs: $(nvidia-smi -L | wc -l)"
 # ==========================================================
 echo "[INFO] Creating virtual environment..."
 ENV_DIR="$SLURM_TMPDIR/vllm-env"
-python -m venv $ENV_DIR
+python -m venv "$ENV_DIR"
 
 # Activate venv
-source $ENV_DIR/bin/activate
+source "$ENV_DIR/bin/activate"
 echo "[INFO] Python from venv: $(which python)"
 
 # ==========================================================
@@ -123,7 +123,7 @@ python -m vllm.entrypoints.openai.api_server \
 
 VLLM_PID=$!
 echo "[INFO] vLLM server started with PID: $VLLM_PID"
-echo $VLLM_PID > vllm_server.pid
+echo $VLLM_PID > "$LOG_DIR/vllm_server.pid"
 
 # ==========================================================
 # 8) Wait for server to be healthy

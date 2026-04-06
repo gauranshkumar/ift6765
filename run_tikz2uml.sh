@@ -52,7 +52,7 @@ echo "[INFO] Python: $(which python)"
 echo "[INFO] Installing dependencies..."
 pip install --quiet --upgrade pip
 pip install --quiet --no-index pyarrow pandas
-pip install --quiet tqdm
+pip install --quiet --no-index tqdm || pip install --quiet tqdm
 
 # ==========================================================
 # 3) Verify vLLM server is accessible

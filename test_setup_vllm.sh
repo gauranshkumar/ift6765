@@ -83,7 +83,7 @@ pip install "vllm>=0.5.1"
 
 echo "[INFO] Installing dependencies from run_tikz2uml.sh..."
 pip install --no-index pyarrow pandas || pip install pyarrow pandas
-pip install tqdm
+pip install --no-index tqdm || pip install tqdm
 
 # ==========================================================
 # 4) Basic Validation
@@ -160,6 +160,116 @@ except Exception as e:
 EOF
 
 VLLM_MODEL_NAME=$MODEL_NAME python "$TMP_DIR/test_inference.py"
+
+# ==========================================================
+# 6) HTTP Server Test (mirrors setup_vllm.sh steps 7-8)
+# ==========================================================
+echo "[INFO] Testing vLLM HTTP server startup (mirrors setup_vllm.sh)..."
+
+TEST_PORT=8765   # separate port to avoid conflicts with any live server
+SERVER_LOG="$TMP_DIR/vllm_server_test.log"
+MAX_SERVER_WAIT=300  # 5 minutes — enough for the tiny opt-125m model
+
+export HF_HOME="$DOWNLOAD_DIR"
+
+python -m vllm.entrypoints.openai.api_server \
+    --model "$MODEL_NAME" \
+    --host 127.0.0.1 \
+    --port "$TEST_PORT" \
+    --max-model-len 512 \
+    --enforce-eager \
+    > "$SERVER_LOG" 2>&1 &
+SERVER_PID=$!
+echo "[INFO] Test vLLM server started with PID: $SERVER_PID"
+
+# Wait for health endpoint
+ELAPSED=0
+SERVER_READY=0
+echo -n "[INFO] Waiting for server health"
+while [ $ELAPSED -lt $MAX_SERVER_WAIT ]; do
+    if ! kill -0 $SERVER_PID 2>/dev/null; then
+        echo ""
+        echo "[ERROR] vLLM server process died during startup. Last log lines:"
+        tail -20 "$SERVER_LOG"
+        exit 1
+    fi
+    if curl -s -f "http://127.0.0.1:$TEST_PORT/health" > /dev/null 2>&1; then
+        SERVER_READY=1
+        echo ""
+        echo "[SUCCESS] vLLM HTTP server is healthy"
+        break
+    fi
+    echo -n "."
+    sleep 5
+    ELAPSED=$((ELAPSED + 5))
+done
+
+if [ $SERVER_READY -eq 0 ]; then
+    echo ""
+    echo "[ERROR] vLLM server failed to become healthy within ${MAX_SERVER_WAIT}s"
+    tail -30 "$SERVER_LOG"
+    kill $SERVER_PID 2>/dev/null || true
+    exit 1
+fi
+
+# ==========================================================
+# 7) OpenAI-Compatible API Test (mirrors tikz2uml.py call_vllm)
+# ==========================================================
+echo "[INFO] Testing OpenAI-compatible API — /v1/models and /v1/chat/completions..."
+
+python - << EOF
+import json, sys, urllib.request, urllib.error
+
+port = $TEST_PORT
+model = "$MODEL_NAME"
+base = f"http://127.0.0.1:{port}"
+
+# -- /v1/models --
+try:
+    with urllib.request.urlopen(f"{base}/v1/models", timeout=10) as r:
+        models = json.loads(r.read())
+    print("[TEST] /v1/models OK —", [m["id"] for m in models.get("data", [])])
+except Exception as e:
+    print(f"[ERROR] /v1/models failed: {e}")
+    sys.exit(1)
+
+# -- /v1/chat/completions (mirrors call_vllm in tikz2uml.py) --
+payload = json.dumps({
+    "model": model,
+    "messages": [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user",   "content": "Say the word hello."},
+    ],
+    "temperature": 0.0,
+    "max_tokens": 10,
+}).encode("utf-8")
+
+req = urllib.request.Request(
+    f"{base}/v1/chat/completions",
+    data=payload,
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(req, timeout=30) as r:
+        resp = json.loads(r.read())
+    reply = resp["choices"][0]["message"]["content"].strip()
+    print(f"[TEST] /v1/chat/completions OK — reply: {reply!r}")
+except urllib.error.HTTPError as e:
+    print(f"[ERROR] /v1/chat/completions HTTP {e.code}: {e.reason}")
+    sys.exit(1)
+except Exception as e:
+    print(f"[ERROR] /v1/chat/completions failed: {e}")
+    sys.exit(1)
+
+print("[SUCCESS] OpenAI-compatible API is working correctly")
+EOF
+
+# Cleanup test server
+echo "[INFO] Stopping test server (PID: $SERVER_PID)..."
+kill $SERVER_PID 2>/dev/null || true
+wait $SERVER_PID 2>/dev/null || true
+echo "[INFO] Test server stopped"
 
 echo "=========================================="
 echo "[SUCCESS] vLLM test script finished successfully!"

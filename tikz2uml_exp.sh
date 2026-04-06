@@ -55,8 +55,11 @@ bash "$(dirname "$0")/setup_vllm.sh"
 # ==========================================================
 # Step 2: Run tikz2uml.py
 # ==========================================================
+# Temporarily disable set -e so cleanup always runs even on failure
+set +e
 bash "$(dirname "$0")/run_tikz2uml.sh"
 EXPERIMENT_EXIT_CODE=$?
+set -e
 
 # ==========================================================
 # Step 3: Cleanup
