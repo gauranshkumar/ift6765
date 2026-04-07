@@ -12,7 +12,7 @@
 #SBATCH --account=def-syriani
 #SBATCH --time=12:00:00
 #SBATCH --mem=64G
-#SBATCH --gpus-per-node=h100:3
+#SBATCH --gpus-per-node=h100:4
 #SBATCH --cpus-per-task=12               # 4 CPUs per GPU
 #SBATCH --output=/scratch/gauransh/logs/tikz2uml-%j.out
 #SBATCH --error=/scratch/gauransh/logs/tikz2uml-%j.err
@@ -22,7 +22,7 @@
 # ==========================================================
 # Configuration
 # ==========================================================
-export TENSOR_PARALLEL_SIZE=3
+export TENSOR_PARALLEL_SIZE=4
 export VLLM_PORT=8000
 export VLLM_MODEL="Qwen/Qwen3-Coder-Next"
 export LOG_DIR="/scratch/gauransh/logs"
