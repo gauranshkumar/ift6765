@@ -166,9 +166,19 @@ def main():
         return
 
     log.info(f"Loading {len(train_files)} parquet file(s)...")
-    df = pd.read_parquet(train_files, columns=["sketch_image", "tikz_code", "tool"])
-    df = df.reset_index(drop=True)
-    log.info(f"Loaded {df.shape[0]} rows.")
+    split_dfs = []
+    for path in sorted(train_files):
+        # Extract split name from filename, e.g. "train-00001-of-00004.parquet" → "train"
+        basename = os.path.basename(path)
+        split_name = basename.split("-")[0]  # "train" / "test" / "validation"
+        part_df = pd.read_parquet(path, columns=["sketch_image", "tikz_code", "tool"])
+        part_df["split"] = split_name
+        split_dfs.append(part_df)
+        log.info(f"  {split_name:12s} — {len(part_df):5d} rows  ({basename})")
+
+    df = pd.concat(split_dfs, ignore_index=True)
+    log.info(f"Loaded {df.shape[0]} rows total across {df['split'].nunique()} split(s): "
+             f"{sorted(df['split'].unique())}")
 
     # ── Resume from checkpoint if available ───────────────────────────────────
     image_bytes_list = [row_img["bytes"] for row_img in df["sketch_image"]]
@@ -240,13 +250,22 @@ def main():
     log.info(f"UML invalid     : {uml_invalid}")
     log.info(f"UML valid       : {valid}  ({100*valid/total:.1f}%)")
     log.info("─" * 50)
+    for split_name, grp in df.groupby("split"):
+        s_valid = grp["uml_valid"].sum()
+        s_fail  = grp["llm_failed"].sum()
+        log.info(
+            f"  {split_name:12s} — {len(grp):5d} rows | "
+            f"valid: {s_valid} ({100*s_valid/len(grp):.1f}%) | "
+            f"llm_fail: {s_fail}"
+        )
+    log.info("─" * 50)
 
     # ── Save ──────────────────────────────────────────────────────────────────
     df.to_parquet(OUTPUT_PATH, index=False)
     log.info(f"Saved to {OUTPUT_PATH}")
 
     # Don't print the huge sketch_image dict out to the terminal
-    sample_df = df[["tikz_code", "uml_code", "uml_valid", "llm_failed", "uml_error"]].head()
+    sample_df = df[["split", "tikz_code", "uml_code", "uml_valid", "llm_failed", "uml_error"]].head()
     print(sample_df)
 
 
