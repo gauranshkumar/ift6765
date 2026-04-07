@@ -141,8 +141,6 @@ python -m vllm.entrypoints.openai.api_server \
     --port $VLLM_PORT \
     --download-dir "$DOWNLOAD_DIR" \
     --tensor-parallel-size $TENSOR_PARALLEL_SIZE \
-    --max-model-len 16384 \
-    --max-num-batched-tokens 9216 \
     > "$LOG_DIR/vllm_server.log" 2>&1 &
 
 VLLM_PID=$!
