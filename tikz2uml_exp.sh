@@ -50,14 +50,14 @@ echo "=========================================="
 # Step 1: Setup vLLM and start the inference server
 # ==========================================================
 echo "[INFO] Setting up vLLM server..."
-bash "$(dirname "$0")/setup_vllm.sh"
+bash "$SLURM_SUBMIT_DIR/setup_vllm.sh"
 
 # ==========================================================
 # Step 2: Run tikz2uml.py
 # ==========================================================
 # Temporarily disable set -e so cleanup always runs even on failure
 set +e
-bash "$(dirname "$0")/run_tikz2uml.sh"
+bash "$SLURM_SUBMIT_DIR/run_tikz2uml.sh"
 EXPERIMENT_EXIT_CODE=$?
 set -e
 

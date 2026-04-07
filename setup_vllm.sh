@@ -26,7 +26,7 @@ VLLM_PORT=${VLLM_PORT:-8000}
 LOG_DIR=${LOG_DIR:-"/scratch/gauransh/logs"}
 MODEL_NAME=${VLLM_MODEL:-"Qwen/Qwen3-Coder-Next"}
 DOWNLOAD_DIR="/scratch/gauransh/hf_models"
-MAX_WAIT_TIME=600  # Maximum seconds to wait for server (10 minutes)
+MAX_WAIT_TIME=3600  # Maximum seconds to wait for server (1 hour)
 
 echo "=========================================="
 echo "vLLM Setup Configuration"
