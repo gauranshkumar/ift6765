@@ -10,7 +10,7 @@
 
 #SBATCH --job-name=tikz2uml-vllm
 #SBATCH --account=def-syriani
-#SBATCH --time=12:00:00
+#SBATCH --time=6:00:00
 #SBATCH --mem=64G
 #SBATCH --gpus-per-node=h100:4
 #SBATCH --cpus-per-task=12               # 4 CPUs per GPU
