@@ -140,9 +140,13 @@ python -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 \
     --port $VLLM_PORT \
     --download-dir "$DOWNLOAD_DIR" \
-    --tensor-parallel-size $TENSOR_PARALLEL_SIZE \
-    --max-num-batched-tokens 32768 \
-    > "$LOG_DIR/vllm_server.log" 2>&1 &
+    --tensor-parallel-size "$TENSOR_PARALLEL_SIZE" \
+    --speculative-config.method mtp \
+    --speculative-config.num_speculative_tokens 1 \
+    --tool-call-parser glm47 \
+    --reasoning-parser glm45 \
+    --enable-auto-tool-choice \
+    > "$LOG_DIR/vllm_server2.log" 2>&1 &
 
 VLLM_PID=$!
 echo "[INFO] vLLM server started with PID: $VLLM_PID"
@@ -159,7 +163,7 @@ HEALTH_CHECK_URL="http://localhost:$VLLM_PORT/health"
 while [ $ELAPSED -lt $MAX_WAIT_TIME ]; do
     # Check if process is still running
     if ! kill -0 $VLLM_PID 2>/dev/null; then
-        echo "[ERROR] vLLM server process died! Check $LOG_DIR/vllm_server.log"
+        echo "[ERROR] vLLM server process died! Check $LOG_DIR/vllm_server2.log"
         exit 1
     fi
 
@@ -168,7 +172,7 @@ while [ $ELAPSED -lt $MAX_WAIT_TIME ]; do
         echo "[SUCCESS] vLLM server is ready!"
         echo "[INFO] Server endpoint: http://localhost:$VLLM_PORT/v1"
         echo "[INFO] API docs: http://localhost:$VLLM_PORT/docs"
-        echo "[INFO] Server logs: $LOG_DIR/vllm_server.log"
+        echo "[INFO] Server logs: $LOG_DIR/vllm_server2.log"
         echo "=========================================="
         exit 0
     fi
@@ -181,6 +185,6 @@ done
 # Timeout reached
 echo ""
 echo "[ERROR] vLLM server failed to become healthy within ${MAX_WAIT_TIME}s"
-echo "[ERROR] Check $LOG_DIR/vllm_server.log for details"
-tail -50 "$LOG_DIR/vllm_server.log"
+echo "[ERROR] Check $LOG_DIR/vllm_server2.log for details"
+tail -50 "$LOG_DIR/vllm_server2.log"
 exit 1

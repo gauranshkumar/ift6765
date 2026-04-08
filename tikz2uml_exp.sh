@@ -24,7 +24,7 @@
 # ==========================================================
 export TENSOR_PARALLEL_SIZE=4
 export VLLM_PORT=8000
-export VLLM_MODEL="Qwen/Qwen3-Coder-Next"
+export VLLM_MODEL="zai-org/GLM-4.7-FP8"
 export LOG_DIR="/scratch/gauransh/logs"
 
 # ==========================================================

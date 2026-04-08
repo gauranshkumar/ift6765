@@ -15,8 +15,8 @@ from utils.UML import PlantUMLWebValidator
 # ─────────────────────────────────────────────────────────────────────────────
 
 VLLM_ENDPOINT   = "http://localhost:8000/v1/chat/completions"
-MODEL_NAME       = "Qwen/Qwen3-Coder-Next"          # ← replace with your vLLM model
-OUTPUT_PATH      = "/project/def-syriani/gauransh/ift6765/data/output_with_uml.parquet"
+MODEL_NAME       = "zai-org/GLM-4.7-FP8"       # ← replace with your vLLM model
+OUTPUT_PATH      = "/project/def-syriani/gauransh/ift6765/output/output_with_uml_final.parquet"
 REQUEST_TIMEOUT  = 60                          # seconds per LLM call
 PLANTUML_SERVER  = "https://www.plantuml.com/plantuml"
 MAX_WORKERS      = 8                           # concurrent vLLM requests per batch
