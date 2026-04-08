@@ -12,7 +12,7 @@
 #SBATCH --account=def-syriani
 #SBATCH --time=6:00:00
 #SBATCH --mem=64G
-#SBATCH --gpus-per-node=h100:4
+#SBATCH --gpus-per-node=h100:2
 #SBATCH --cpus-per-task=12               # 4 CPUs per GPU
 #SBATCH --output=/scratch/gauransh/logs/tikz2uml-%j.out
 #SBATCH --error=/scratch/gauransh/logs/tikz2uml-%j.err
@@ -22,9 +22,9 @@
 # ==========================================================
 # Configuration
 # ==========================================================
-export TENSOR_PARALLEL_SIZE=4
+export TENSOR_PARALLEL_SIZE=2
 export VLLM_PORT=8000
-export VLLM_MODEL="zai-org/GLM-4.7-FP8"
+export VLLM_MODEL="zai-org/GLM-4.7-Flash"
 export LOG_DIR="/scratch/gauransh/logs"
 
 # ==========================================================

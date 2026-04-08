@@ -15,7 +15,7 @@ from utils.UML import PlantUMLWebValidator
 # ─────────────────────────────────────────────────────────────────────────────
 
 VLLM_ENDPOINT   = "http://localhost:8000/v1/chat/completions"
-MODEL_NAME       = "zai-org/GLM-4.7-FP8"       # ← replace with your vLLM model
+MODEL_NAME       = "zai-org/GLM-4.7-Flash"       # ← replace with your vLLM model
 OUTPUT_PATH      = "/project/def-syriani/gauransh/ift6765/output/output_with_uml_final.parquet"
 REQUEST_TIMEOUT  = 60                          # seconds per LLM call
 PLANTUML_SERVER  = "https://www.plantuml.com/plantuml"
