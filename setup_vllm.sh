@@ -84,13 +84,18 @@ echo "[INFO] Installing vLLM..."
 pip install "vllm>=0.5.1"
 
 # ==========================================================
-# 5b) vLLM engine selection
+# 5b) vLLM engine selection and attention backend
 # ==========================================================
 # vLLM v1 engine's topk_topp_triton.py mixes uint32/int32 in a Triton
 # kernel division, which Triton 3.0.0's stricter compiler rejects with:
 #   "Cannot use // with triton.language.uint32 and triton.language.int32"
 # Force the v0 engine which uses a plain PyTorch sampler path instead.
 export VLLM_USE_V1=0
+
+# FlashInfer requires a JIT build step that fails on Compute Canada.
+# FLASH_ATTN ships pre-built inside the vLLM wheel and works on H100s
+# without any compilation — use it instead.
+export VLLM_ATTENTION_BACKEND=FLASH_ATTN
 
 # ==========================================================
 # 5c) MIG UUID remapping
