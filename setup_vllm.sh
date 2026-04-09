@@ -96,6 +96,11 @@ export VLLM_USE_V1=0
 # FLASH_ATTN ships pre-built inside the vLLM wheel and works on H100s
 # without any compilation — use it instead.
 export VLLM_ATTENTION_BACKEND=FLASH_ATTN
+# Disable GDN-specific flashinfer kernel
+export VLLM_USE_FLASHINFER_GDN=0
+
+# Or force pure PyTorch fallback for linear attn
+export VLLM_MAMBA_USE_PYTORCH_FALLBACK=1
 
 # ==========================================================
 # 5c) MIG UUID remapping
