@@ -81,7 +81,7 @@ pip install --no-index torch torchvision torchaudio
 # internally; overriding it causes kernel type-checking failures (e.g.
 # uint32/int32 signedness errors in topk_topp_triton.py).
 echo "[INFO] Installing vLLM..."
-pip install "vllm>=0.5.1"
+pip install "vllm>=0.5.1" "flashinfer-jit-cache" 
 
 # ==========================================================
 # 5b) vLLM engine selection and attention backend
@@ -97,10 +97,10 @@ export VLLM_USE_V1=0
 # without any compilation — use it instead.
 export VLLM_ATTENTION_BACKEND=FLASH_ATTN
 # Disable GDN-specific flashinfer kernel
-export VLLM_USE_FLASHINFER_GDN=0
+# export VLLM_USE_FLASHINFER_GDN=0
 
 # Or force pure PyTorch fallback for linear attn
-export VLLM_MAMBA_USE_PYTORCH_FALLBACK=1
+# export VLLM_MAMBA_USE_PYTORCH_FALLBACK=1
 
 # ==========================================================
 # 5c) MIG UUID remapping
