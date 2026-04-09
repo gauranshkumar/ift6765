@@ -52,6 +52,8 @@ module load opencv || true
 echo "[INFO] Job running on: $(hostname)"
 echo "[INFO] SLURM_TMPDIR: $SLURM_TMPDIR"
 echo "[INFO] Available GPUs: $(nvidia-smi -L | wc -l)"
+echo "[INFO] CUDA version (nvidia-smi): $(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1) / CUDA $(nvidia-smi | grep -oP 'CUDA Version: \K[0-9.]+')"
+echo "[INFO] NVCC version: $(nvcc --version | grep release | grep -oP 'release \K[0-9.]+')"
 
 # ==========================================================
 # 2) Create venv inside local SSD for max speed
@@ -125,15 +127,23 @@ echo "[INFO] Validating installation..."
 python - << 'EOF'
 import torch, vllm, triton, transformers
 
-print("Torch:", torch.__version__)
-print("Triton:", triton.__version__)
-print("vLLM:", vllm.__version__)
-print("Transformers:", transformers.__version__)
-print("CUDA available:", torch.cuda.is_available())
+print("Torch:          ", torch.__version__)
+print("Torch CUDA:     ", torch.version.cuda)
+print("Triton:         ", triton.__version__)
+print("vLLM:           ", vllm.__version__)
+print("Transformers:   ", transformers.__version__)
+
+try:
+    import flashinfer
+    print("FlashInfer:     ", flashinfer.__version__)
+except ImportError:
+    print("FlashInfer:      not installed")
+
+print("CUDA available: ", torch.cuda.is_available())
 if torch.cuda.is_available():
-    print("Number of GPUs:", torch.cuda.device_count())
+    print("Number of GPUs: ", torch.cuda.device_count())
     for i in range(torch.cuda.device_count()):
-        print(f"GPU {i}:", torch.cuda.get_device_name(i))
+        print(f"  GPU {i}:       ", torch.cuda.get_device_name(i))
 EOF
 
 echo "[INFO] vLLM setup finished successfully!"
@@ -174,7 +184,7 @@ HEALTH_CHECK_URL="http://localhost:$VLLM_PORT/health"
 while [ $ELAPSED -lt $MAX_WAIT_TIME ]; do
     # Check if process is still running
     if ! kill -0 $VLLM_PID 2>/dev/null; then
-        echo "[ERROR] vLLM server process died! Check $LOG_DIR/vllm_server.log"
+        echo "[ERROR] vLLM server process died! Check $VLLM_LOG"
         exit 1
     fi
 
