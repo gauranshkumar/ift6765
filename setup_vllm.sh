@@ -79,7 +79,7 @@ pip install --no-index torch torchvision torchaudio
 # internally; overriding it causes kernel type-checking failures (e.g.
 # uint32/int32 signedness errors in topk_topp_triton.py).
 echo "[INFO] Installing vLLM..."
-pip install "vllm>=0.5.1"
+pip install "vllm>=0.5.1" "transformers>=5.1.0"
 
 # ==========================================================
 # 5b) vLLM engine selection
