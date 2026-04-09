@@ -151,6 +151,7 @@ python -m vllm.entrypoints.openai.api_server \
     --tensor-parallel-size "$TENSOR_PARALLEL_SIZE" \
     --max-model-len 32768 \
     --dtype bfloat16 \
+    --disable-custom-all-reduce \
     > "$VLLM_LOG" 2>&1 &
 
 VLLM_PID=$!
