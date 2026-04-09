@@ -27,6 +27,8 @@ LOG_DIR=${LOG_DIR:-"/scratch/gauransh/logs"}
 MODEL_NAME=${VLLM_MODEL:-"Qwen/Qwen3-Coder-Next"}
 DOWNLOAD_DIR="/scratch/gauransh/hf_models"
 MAX_WAIT_TIME=3600  # Maximum seconds to wait for server (1 hour)
+RUN_ID="${SLURM_JOB_ID:-$(date +%Y%m%d_%H%M%S)}"
+VLLM_LOG="$LOG_DIR/vllm_server_${RUN_ID}.log"
 
 echo "=========================================="
 echo "vLLM Setup Configuration"
@@ -79,7 +81,7 @@ pip install --no-index torch torchvision torchaudio
 # internally; overriding it causes kernel type-checking failures (e.g.
 # uint32/int32 signedness errors in topk_topp_triton.py).
 echo "[INFO] Installing vLLM..."
-pip install "vllm>=0.5.1" "transformers>=5.1.0"
+pip install "vllm>=0.5.1"
 
 # ==========================================================
 # 5b) vLLM engine selection
@@ -111,11 +113,12 @@ fi
 # ==========================================================
 echo "[INFO] Validating installation..."
 python - << 'EOF'
-import torch, vllm, triton
+import torch, vllm, triton, transformers
 
 print("Torch:", torch.__version__)
 print("Triton:", triton.__version__)
 print("vLLM:", vllm.__version__)
+print("Transformers:", transformers.__version__)
 print("CUDA available:", torch.cuda.is_available())
 if torch.cuda.is_available():
     print("Number of GPUs:", torch.cuda.device_count())
@@ -141,12 +144,9 @@ python -m vllm.entrypoints.openai.api_server \
     --port $VLLM_PORT \
     --download-dir "$DOWNLOAD_DIR" \
     --tensor-parallel-size "$TENSOR_PARALLEL_SIZE" \
-    --speculative-config.method mtp \
-    --speculative-config.num_speculative_tokens 1 \
-    --tool-call-parser glm47 \
-    --reasoning-parser glm45 \
-    --enable-auto-tool-choice \
-    > "$LOG_DIR/vllm_server2.log" 2>&1 &
+    --max-model-len 32768 \
+    --dtype bfloat16 \
+    > "$VLLM_LOG" 2>&1 &
 
 VLLM_PID=$!
 echo "[INFO] vLLM server started with PID: $VLLM_PID"
@@ -163,7 +163,7 @@ HEALTH_CHECK_URL="http://localhost:$VLLM_PORT/health"
 while [ $ELAPSED -lt $MAX_WAIT_TIME ]; do
     # Check if process is still running
     if ! kill -0 $VLLM_PID 2>/dev/null; then
-        echo "[ERROR] vLLM server process died! Check $LOG_DIR/vllm_server2.log"
+        echo "[ERROR] vLLM server process died! Check $LOG_DIR/vllm_server.log"
         exit 1
     fi
 
@@ -172,7 +172,8 @@ while [ $ELAPSED -lt $MAX_WAIT_TIME ]; do
         echo "[SUCCESS] vLLM server is ready!"
         echo "[INFO] Server endpoint: http://localhost:$VLLM_PORT/v1"
         echo "[INFO] API docs: http://localhost:$VLLM_PORT/docs"
-        echo "[INFO] Server logs: $LOG_DIR/vllm_server2.log"
+        echo "[INFO] Server logs: $VLLM_LOG"
+        echo "[INFO] Run ID: $RUN_ID"
         echo "=========================================="
         exit 0
     fi
@@ -185,6 +186,6 @@ done
 # Timeout reached
 echo ""
 echo "[ERROR] vLLM server failed to become healthy within ${MAX_WAIT_TIME}s"
-echo "[ERROR] Check $LOG_DIR/vllm_server2.log for details"
-tail -50 "$LOG_DIR/vllm_server2.log"
+echo "[ERROR] Check $VLLM_LOG for details"
+tail -50 "$VLLM_LOG"
 exit 1
