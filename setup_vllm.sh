@@ -164,10 +164,15 @@ python -m vllm.entrypoints.openai.api_server \
     --port $VLLM_PORT \
     --download-dir "$DOWNLOAD_DIR" \
     --tensor-parallel-size "$TENSOR_PARALLEL_SIZE" \
-    # --max-model-len 32768 \
-    # --dtype bfloat16 \
-    # --disable-custom-all-reduce \
+    --max-num-seqs 16 \
+    --max-num-batched-tokens 4096 \
+    --max-model-len 32768 \
+    --no-enable-prefix-caching \
     > "$VLLM_LOG" 2>&1 &
+    
+# --max-model-len 32768 \
+# --dtype bfloat16 \
+# --disable-custom-all-reduce \
 
 VLLM_PID=$!
 echo "[INFO] vLLM server started with PID: $VLLM_PID"
