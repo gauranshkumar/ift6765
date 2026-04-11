@@ -16,9 +16,9 @@ import pandas as pd
 import glob
 import json
 import logging
-import urllib.request
 import urllib.error
 import argparse
+import sys
 import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
@@ -38,8 +38,21 @@ OPENAI_MODEL_NAME = "gpt-4.5-preview"
 VLLM_MODEL_NAME   = "Qwen/Qwen3-VL-4B-Instruct"
 VLLM_ENDPOINT     = "http://localhost:8000/v1/chat/completions"
 
-OUTPUT_PATH      = "/project/def-syriani/gauransh/ift6765/data/vision_output_with_uml.parquet"
-CHECKPOINT_PATH  = "/project/def-syriani/gauransh/ift6765/data/vision_checkpoint.parquet"
+if "--no-hpc" in sys.argv:
+    BASE_DIR         = "/Tmp/kumargau/ift6765"
+    DATA_DIR         = f"{BASE_DIR}/data"
+    OUTPUT_DIR       = f"{BASE_DIR}/output"
+    LOG_DIR          = f"{BASE_DIR}/logs"
+else:
+    BASE_DIR         = "/project/def-syriani/gauransh/ift6765"
+    DATA_DIR         = f"{BASE_DIR}/data"
+    OUTPUT_DIR       = f"{BASE_DIR}/output"
+    LOG_DIR          = "/scratch/gauransh/logs"
+# Unique run ID — SLURM job ID when running via sbatch, timestamp otherwise
+RUN_ID           = os.environ.get("SLURM_JOB_ID", datetime.now().strftime("%Y%m%d_%H%M%S"))
+OUTPUT_PATH      = f"{OUTPUT_DIR}/image2uml_{RUN_ID}.parquet"
+CHECKPOINT_PATH  = f"{OUTPUT_DIR}/image2uml_{RUN_ID}_checkpoint.parquet"
+
 REQUEST_TIMEOUT  = 120                        # seconds per LLM call (longer for vision)
 PLANTUML_SERVER  = "https://www.plantuml.com/plantuml"
 BATCH_SIZE       = 32                         # rows submitted to the server at once
@@ -53,19 +66,22 @@ api_key = os.environ.get("OPENAI_API_KEY")
 if not api_key:
     pass
 
-print(api_key[:4])
+print(api_key[:4] if api_key else "None")
 openai_client = OpenAI(api_key=api_key)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging
 # ─────────────────────────────────────────────────────────────────────────────
 
+os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("/scratch/gauransh/logs/vision_conversion.log", encoding="utf-8"),
+        logging.FileHandler(f"{LOG_DIR}/vision_conversion.log", encoding="utf-8"),
     ],
 )
 log = logging.getLogger(__name__)
@@ -222,7 +238,7 @@ def process_row(image_bytes: bytes, provider: str = "vllm") -> dict:
 def main(provider: str, max_workers: int):
     # ── Load data ─────────────────────────────────────────────────────────────
     # Exclude checkpoint and output files from the input glob
-    all_parquet = glob.glob("/project/def-syriani/gauransh/ift6765/data/*.parquet")
+    all_parquet = glob.glob(f"{DATA_DIR}/*.parquet")
     train_files = [
         p for p in all_parquet
         if os.path.basename(p) not in {
@@ -231,7 +247,7 @@ def main(provider: str, max_workers: int):
         }
     ]
     if not train_files:
-        log.error("No parquet files found in /project/def-syriani/gauransh/ift6765/data/")
+        log.error(f"No parquet files found in {DATA_DIR}/")
         return
 
     log.info(f"Loading {len(train_files)} parquet file(s)...")
@@ -344,6 +360,8 @@ if __name__ == "__main__":
                         help="Choose the model provider (vllm or openai, defaults to vllm)")
     parser.add_argument("--workers", type=int, default=None,
                         help="Max concurrent workers (defaults to 8 for vllm, 4 for openai)")
+    parser.add_argument("--no-hpc", action="store_true", 
+                        help="Use local /Tmp base path instead of HPC cluster paths")
     args = parser.parse_args()
 
     max_concurrent = args.workers if args.workers is not None else (8 if args.provider == "vllm" else 4)

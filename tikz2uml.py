@@ -16,9 +16,9 @@ import pandas as pd
 import glob
 import json
 import logging
-import urllib.request
 import urllib.error
 import argparse
+import sys
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
@@ -38,7 +38,7 @@ OPENAI_MODEL_NAME = "gpt-4.5-preview"
 VLLM_MODEL_NAME   = "openai/gpt-oss-120b"
 VLLM_ENDPOINT     = "http://localhost:8000/v1/chat/completions"
 
-REQUEST_TIMEOUT  = 60                          # seconds per LLM call
+REQUEST_TIMEOUT  = 120                          # seconds per LLM call
 PLANTUML_SERVER  = "https://www.plantuml.com/plantuml"
 BATCH_SIZE       = 32                          # rows saved to checkpoint at once
 
@@ -51,11 +51,19 @@ api_key = os.environ.get("OPENAI_API_KEY")
 if not api_key:
     # We only log a warning here rather than exit because user might solely be using vllm provider
     pass 
-print(api_key[:4])
+print(api_key[:4] if api_key else "None")
 openai_client = OpenAI(api_key=api_key)
 
-DATA_DIR         = "/project/def-syriani/gauransh/ift6765/data"
-OUTPUT_DIR       = "/project/def-syriani/gauransh/ift6765/output"
+if "--no-hpc" in sys.argv:
+    BASE_DIR     = "/Tmp/kumargau/ift6765"
+    DATA_DIR     = f"{BASE_DIR}/data"
+    OUTPUT_DIR   = f"{BASE_DIR}/output"
+    LOG_DIR      = f"{BASE_DIR}/logs"
+else:
+    BASE_DIR     = "/project/def-syriani/gauransh/ift6765"
+    DATA_DIR     = f"{BASE_DIR}/data"
+    OUTPUT_DIR   = f"{BASE_DIR}/output"
+    LOG_DIR      = "/scratch/gauransh/logs"
 
 # Unique run ID — SLURM job ID when running via sbatch, timestamp otherwise
 RUN_ID           = os.environ.get("SLURM_JOB_ID", datetime.now().strftime("%Y%m%d_%H%M%S"))
@@ -66,7 +74,7 @@ CHECKPOINT_PATH  = f"{OUTPUT_DIR}/tikz2uml_{RUN_ID}_checkpoint.parquet"
 # Logging
 # ─────────────────────────────────────────────────────────────────────────────
 
-os.makedirs("/scratch/gauransh/logs", exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 logging.basicConfig(
@@ -74,7 +82,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(f"/scratch/gauransh/logs/tikz2uml_conversion_{RUN_ID}.log", encoding="utf-8"),
+        logging.FileHandler(f"{LOG_DIR}/tikz2uml_conversion_{RUN_ID}.log", encoding="utf-8"),
     ],
 )
 log = logging.getLogger(__name__)
@@ -346,6 +354,8 @@ if __name__ == "__main__":
                         help="Choose the model provider (vllm or openai, defaults to vllm)")
     parser.add_argument("--workers", type=int, default=None,
                         help="Max concurrent workers (defaults to 8 for vllm, 4 for openai)")
+    parser.add_argument("--no-hpc", action="store_true", 
+                        help="Use local /Tmp base path instead of HPC cluster paths")
     args = parser.parse_args()
 
     max_concurrent = args.workers if args.workers is not None else (8 if args.provider == "vllm" else 4)
