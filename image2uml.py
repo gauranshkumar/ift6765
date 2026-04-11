@@ -256,33 +256,41 @@ def submit_openai_vision_batch(df: pd.DataFrame, output_dir: str):
         }
         requests.append(req)
         
-    log.info(f"Writing {len(requests)} requests to file...")
-    with open(jsonl_path, "w", encoding="utf-8") as f:
-        for r in requests:
-            f.write(json.dumps(r) + "\n")
-            
-    log.info("Uploading file to OpenAI...")
-    batch_input_file = openai_client.files.create(
-      file=open(jsonl_path, "rb"),
-      purpose="batch"
-    )
+    log.info("Splitting into chunks to avoid 413 Payload Too Large limits...")
+    CHUNK_SIZE = 500
+    batch_ids = []
     
-    log.info(f"Uploaded file ID: {batch_input_file.id}")
-    log.info("Submitting batch job...")
-    batch = openai_client.batches.create(
-        input_file_id=batch_input_file.id,
-        endpoint="/v1/chat/completions",
-        completion_window="24h",
-        metadata={
-          "description": "image2uml batch"
-        }
-    )
-    
-    log.info(f"Batch submitted successfully! Batch ID: {batch.id}")
+    for i in range(0, len(requests), CHUNK_SIZE):
+        chunk = requests[i:i + CHUNK_SIZE]
+        jsonl_path = f"{output_dir}/vision_batch_requests_{run_id}_part{i//CHUNK_SIZE}.jsonl"
+        log.info(f"Writing {len(chunk)} requests to {jsonl_path}...")
+        
+        with open(jsonl_path, "w", encoding="utf-8") as f:
+            for r in chunk:
+                f.write(json.dumps(r) + "\n")
+                
+        log.info(f"Uploading file {i//CHUNK_SIZE} to OpenAI...")
+        batch_input_file = openai_client.files.create(
+          file=open(jsonl_path, "rb"),
+          purpose="batch"
+        )
+        
+        log.info(f"Uploaded file ID: {batch_input_file.id}. Submitting batch job...")
+        batch = openai_client.batches.create(
+            input_file_id=batch_input_file.id,
+            endpoint="/v1/chat/completions",
+            completion_window="24h",
+            metadata={
+              "description": f"image2uml batch part {i//CHUNK_SIZE}"
+            }
+        )
+        log.info(f"Batch part {i//CHUNK_SIZE} submitted! Batch ID: {batch.id}")
+        batch_ids.append(batch.id)
+
     batch_file_path = f"{output_dir}/.vision_batch_job_id"
     with open(batch_file_path, "w") as f:
-        f.write(batch.id)
-    log.info(f"Batch ID saved to {batch_file_path} for retrieval.")
+        f.write(",".join(batch_ids))
+    log.info(f"All Batch IDs saved to {batch_file_path} for retrieval.")
     log.info("Run the script again with `--mode retrieve` later to check status.")
 
 
@@ -293,42 +301,52 @@ def retrieve_openai_vision_batch(df: pd.DataFrame, output_path: str, output_dir:
         return
         
     with open(batch_file_path, "r") as f:
-        batch_id = f.read().strip()
+        batch_ids_str = f.read().strip()
         
-    log.info(f"Retrieving batch status for ID: {batch_id}")
-    try:
-        batch = openai_client.batches.retrieve(batch_id)
-        log.info(f"Batch Status: {batch.status}")
-    except Exception as e:
-        log.error(f"Failed to retrieve batch: {e}")
-        return
-    
-    if batch.status != "completed":
-        log.warning(f"Batch is not completed yet.")
-        return
-        
-    if not batch.output_file_id:
-        log.error("Batch completed but no output_file_id was found!")
-        return
-        
-    log.info("Downloading results...")
-    content = openai_client.files.content(batch.output_file_id).text
-    
+    batch_ids = [b.strip() for b in batch_ids_str.split(",") if b.strip()]
     results_map = {}
-    for line in content.strip().split("\n"):
-        if not line:
+    all_completed = True
+    
+    for batch_id in batch_ids:
+        log.info(f"Retrieving batch status for ID: {batch_id}")
+        try:
+            batch = openai_client.batches.retrieve(batch_id)
+        except Exception as e:
+            log.error(f"Failed to retrieve batch: {e}")
+            all_completed = False
             continue
-        obj = json.loads(line)
-        idx_str = obj["custom_id"].split("_")[1]
-        idx = int(idx_str)
         
-        if obj["response"]["status_code"] == 200:
-            msg = obj["response"]["body"]["choices"][0]["message"]["content"]
-            msg = re.sub(r"<think>.*?</think>", "", msg, flags=re.DOTALL).strip()
-            results_map[idx] = msg
-        else:
-            log.warning(f"Row {idx} failed in batch response.")
-            results_map[idx] = None
+        if batch.status != "completed":
+            log.warning(f"Batch {batch_id} is not completed yet (Status: {batch.status}).")
+            all_completed = False
+            continue
+            
+        if not batch.output_file_id:
+            log.error(f"Batch {batch_id} completed but no output_file_id was found!")
+            all_completed = False
+            continue
+            
+        log.info(f"Downloading results for {batch_id}...")
+        content = openai_client.files.content(batch.output_file_id).text
+        
+        for line in content.strip().split("\n"):
+            if not line:
+                continue
+            obj = json.loads(line)
+            idx_str = obj["custom_id"].split("_")[1]
+            idx = int(idx_str)
+            
+            if obj["response"]["status_code"] == 200:
+                msg = obj["response"]["body"]["choices"][0]["message"]["content"]
+                msg = re.sub(r"<think>.*?</think>", "", msg, flags=re.DOTALL).strip()
+                results_map[idx] = msg
+            else:
+                log.warning(f"Row {idx} failed in batch response.")
+                results_map[idx] = None
+                
+    if not all_completed:
+        log.error("Not all batches have completed successfully. Aborting merge process. Please try again later.")
+        return
             
     log.info("Validating PlantUML logic via Web API...")
     n_total = len(df)

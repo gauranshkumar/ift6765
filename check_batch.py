@@ -49,37 +49,43 @@ def main():
             sys.exit(1)
             
         with open(batch_file, "r") as f:
-            batch_id = f.read().strip()
+            batch_ids_str = f.read().strip()
             
-    if not batch_id:
+    if batch_id:
+        # If passed explicitly via --batch-id
+        batch_ids = [batch_id]
+    elif args.job:
+        # If pulled from the saved file
+        batch_ids = [b.strip() for b in batch_ids_str.split(",") if b.strip()]
+    else:
         print("Error: You must provide either --batch-id explicitly, or --job [tikz|image]")
         sys.exit(1)
         
-    print(f"Retrieving batch status for ID: {batch_id}")
-    try:
-        batch = client.batches.retrieve(batch_id)
-        print()
-        print("=" * 50)
-        print(f" Batch ID:         {batch.id}")
-        print(f" Status:           {batch.status.upper()}")
-        
-        if batch.request_counts:
-            print(f" Total Requests:   {batch.request_counts.total}")
-            print(f" Completed:        {batch.request_counts.completed}")
-            print(f" Failed:           {batch.request_counts.failed}")
+    for current_batch in batch_ids:
+        print(f"\nRetrieving batch status for ID: {current_batch}")
+        try:
+            batch = client.batches.retrieve(current_batch)
+            print("=" * 50)
+            print(f" Batch ID:         {batch.id}")
+            print(f" Status:           {batch.status.upper()}")
             
-        if getattr(batch, "created_at", None):
-            dt = datetime.fromtimestamp(batch.created_at)
-            print(f" Created At:       {dt.strftime('%Y-%m-%d %H:%M:%S')}")
-            
-        if batch.errors and batch.errors.data:
-            print("\n Errors Encountered:")
-            for error in batch.errors.data:
-                print(f"  - [{error.code}]: {error.message}")
+            if batch.request_counts:
+                print(f" Total Requests:   {batch.request_counts.total}")
+                print(f" Completed:        {batch.request_counts.completed}")
+                print(f" Failed:           {batch.request_counts.failed}")
                 
-        print("=" * 50)
-    except Exception as e:
-        print(f"Failed to retrieve batch: {e}")
+            if getattr(batch, "created_at", None):
+                dt = datetime.fromtimestamp(batch.created_at)
+                print(f" Created At:       {dt.strftime('%Y-%m-%d %H:%M:%S')}")
+                
+            if batch.errors and batch.errors.data:
+                print("\n Errors Encountered:")
+                for error in batch.errors.data:
+                    print(f"  - [{error.code}]: {error.message}")
+                    
+            print("=" * 50)
+        except Exception as e:
+            print(f"Failed to retrieve batch {current_batch}: {e}")
 
 if __name__ == "__main__":
     main()
