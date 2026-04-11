@@ -1,3 +1,4 @@
+import os
 import re
 import pandas as pd
 import glob
@@ -5,6 +6,7 @@ import json
 import logging
 import urllib.request
 import urllib.error
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
@@ -15,23 +17,33 @@ from utils.UML import PlantUMLWebValidator
 # ─────────────────────────────────────────────────────────────────────────────
 
 VLLM_ENDPOINT   = "http://localhost:8000/v1/chat/completions"
-MODEL_NAME       = "openai/gpt-oss-120b"       # ← replace with your vLLM model
-OUTPUT_PATH      = "/project/def-syriani/gauransh/ift6765/output/output_with_uml_final.parquet"
+MODEL_NAME       = "openai/gpt-oss-120b"
 REQUEST_TIMEOUT  = 60                          # seconds per LLM call
 PLANTUML_SERVER  = "https://www.plantuml.com/plantuml"
 MAX_WORKERS      = 8                           # concurrent vLLM requests per batch
 BATCH_SIZE       = 64                          # rows submitted to the server at once
 
+DATA_DIR         = "/project/def-syriani/gauransh/ift6765/data"
+OUTPUT_DIR       = "/project/def-syriani/gauransh/ift6765/output"
+
+# Unique run ID — SLURM job ID when running via sbatch, timestamp otherwise
+RUN_ID           = os.environ.get("SLURM_JOB_ID", datetime.now().strftime("%Y%m%d_%H%M%S"))
+OUTPUT_PATH      = f"{OUTPUT_DIR}/tikz2uml_{RUN_ID}.parquet"
+CHECKPOINT_PATH  = f"{OUTPUT_DIR}/tikz2uml_{RUN_ID}_checkpoint.parquet"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging
 # ─────────────────────────────────────────────────────────────────────────────
+
+os.makedirs("/scratch/gauransh/logs", exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("/scratch/gauransh/logs/conversion.log", encoding="utf-8"),
+        logging.FileHandler(f"/scratch/gauransh/logs/tikz2uml_conversion_{RUN_ID}.log", encoding="utf-8"),
     ],
 )
 log = logging.getLogger(__name__)
@@ -108,6 +120,7 @@ def process_row(tikz_code: str) -> dict:
       uml_code        - generated PlantUML string (or empty string on LLM failure)
       uml_valid       - True / False
       uml_error       - error message string, empty if valid
+      llm_failed      - True / False
     """
     result = {"uml_code": "", "uml_valid": False, "uml_error": "", "llm_failed": False}
 
@@ -116,7 +129,7 @@ def process_row(tikz_code: str) -> dict:
     if uml_code is None:
         result["uml_valid"]  = False
         result["llm_failed"] = True
-        result["uml_error"]  = "LLM call failed — see conversion.log"
+        result["uml_error"]  = "LLM call failed — see log"
         log.warning("Skipping validation: LLM did not return output.")
         return result
 
@@ -143,37 +156,84 @@ def process_row(tikz_code: str) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
+    log.info(f"Run ID      : {RUN_ID}")
+    log.info(f"Output      : {OUTPUT_PATH}")
+    log.info(f"Checkpoint  : {CHECKPOINT_PATH}")
+
     # ── Load data ─────────────────────────────────────────────────────────────
-    train_files = glob.glob("/project/def-syriani/gauransh/ift6765/data/*.parquet")
+    train_files = sorted(glob.glob(f"{DATA_DIR}/*.parquet"))
     if not train_files:
-        log.error("No parquet files found in /project/def-syriani/gauransh/ift6765/data/")
+        log.error(f"No parquet files found in {DATA_DIR}/")
         return
 
     log.info(f"Loading {len(train_files)} parquet file(s)...")
-    df = pd.read_parquet(train_files, columns=["tikz_code"])
-    log.info(f"Loaded {df.shape[0]} rows.")
+    split_dfs = []
+    for path in train_files:
+        basename = os.path.basename(path)
+        split_name = basename.split("-")[0]  # "train" / "test" / "validation"
+        part_df = pd.read_parquet(path, columns=["tikz_code"])
+        part_df["split"] = split_name
+        split_dfs.append(part_df)
+        log.info(f"  {split_name:12s} — {len(part_df):5d} rows  ({basename})")
 
-    # ── Process in batches to avoid overloading the vLLM server ──────────────
+    df = pd.concat(split_dfs, ignore_index=True)
+    log.info(
+        f"Loaded {df.shape[0]} rows total across {df['split'].nunique()} split(s): "
+        f"{sorted(df['split'].unique())}"
+    )
+
+    # ── Resume from checkpoint if available ───────────────────────────────────
     tikz_codes = df["tikz_code"].tolist()
-    results = [None] * len(tikz_codes)
-    n_batches = (len(tikz_codes) + BATCH_SIZE - 1) // BATCH_SIZE
+    n_total    = len(tikz_codes)
+    results    = [None] * n_total
+    n_done     = 0
 
-    with tqdm(total=len(tikz_codes), desc="Converting TikZ → UML") as pbar:
+    if os.path.exists(CHECKPOINT_PATH):
+        log.info(f"Resuming from checkpoint: {CHECKPOINT_PATH}")
+        ckpt_df = pd.read_parquet(CHECKPOINT_PATH)
+        n_done  = len(ckpt_df)
+        if n_done >= n_total:
+            log.info("Checkpoint covers all rows — skipping inference, writing final output.")
+            for i, row in enumerate(ckpt_df.to_dict("records")):
+                results[i] = row
+            n_done = n_total
+        else:
+            for i, row in enumerate(ckpt_df.to_dict("records")):
+                results[i] = row
+            log.info(f"Checkpoint has {n_done}/{n_total} rows — resuming from row {n_done}.")
+
+    # ── Process in batches ────────────────────────────────────────────────────
+    n_batches = (n_total + BATCH_SIZE - 1) // BATCH_SIZE
+
+    with tqdm(total=n_total, initial=n_done, desc="Converting TikZ → UML") as pbar:
         for batch_idx in range(n_batches):
             start = batch_idx * BATCH_SIZE
-            end   = min(start + BATCH_SIZE, len(tikz_codes))
-            batch = tikz_codes[start:end]
+            end   = min(start + BATCH_SIZE, n_total)
+
+            # Skip batches already covered by the checkpoint
+            if end <= n_done:
+                continue
+
+            # For the first partial batch after a resume, start mid-batch
+            row_start = max(start, n_done)
+            batch     = tikz_codes[row_start:end]
 
             with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 futures = {
-                    executor.submit(process_row, str(code)): start + i
+                    executor.submit(process_row, str(code)): row_start + i
                     for i, code in enumerate(batch)
                 }
                 for future in as_completed(futures):
                     results[futures[future]] = future.result()
                     pbar.update(1)
 
-            log.info(f"Batch {batch_idx + 1}/{n_batches} done ({end}/{len(tikz_codes)} rows)")
+            # ── Checkpoint: persist all completed rows after every batch ──────
+            completed = [r for r in results if r is not None]
+            pd.DataFrame(completed).to_parquet(CHECKPOINT_PATH, index=False)
+            log.info(
+                f"Batch {batch_idx + 1}/{n_batches} done "
+                f"({end}/{n_total} rows) — checkpoint saved."
+            )
 
     # ── Merge results into DataFrame ──────────────────────────────────────────
     results_df = pd.DataFrame(results, index=df.index)
@@ -191,12 +251,21 @@ def main():
     log.info(f"UML invalid     : {uml_invalid}")
     log.info(f"UML valid       : {valid}  ({100*valid/total:.1f}%)")
     log.info("─" * 50)
+    for split_name, grp in df.groupby("split"):
+        s_valid = grp["uml_valid"].sum()
+        s_fail  = grp["llm_failed"].sum()
+        log.info(
+            f"  {split_name:12s} — {len(grp):5d} rows | "
+            f"valid: {s_valid} ({100*s_valid/len(grp):.1f}%) | "
+            f"llm_fail: {s_fail}"
+        )
+    log.info("─" * 50)
 
     # ── Save ──────────────────────────────────────────────────────────────────
     df.to_parquet(OUTPUT_PATH, index=False)
     log.info(f"Saved to {OUTPUT_PATH}")
 
-    print(df[["tikz_code", "uml_code", "uml_valid", "llm_failed", "uml_error"]].head())
+    print(df[["split", "tikz_code", "uml_code", "uml_valid", "llm_failed", "uml_error"]].head())
 
 
 if __name__ == "__main__":
