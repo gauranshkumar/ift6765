@@ -1,3 +1,14 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "pandas",
+#     "pyarrow",
+#     "tqdm",
+#     "openai",
+#     "tenacity"
+# ]
+# ///
+
 import os
 import re
 import pandas as pd
@@ -6,9 +17,14 @@ import json
 import logging
 import urllib.request
 import urllib.error
+import argparse
 import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+
+from openai import OpenAI
+import openai
+from tenacity import retry, wait_random_exponential, stop_after_attempt, retry_if_exception_type
 
 from utils.UML import PlantUMLWebValidator
 
@@ -16,14 +32,17 @@ from utils.UML import PlantUMLWebValidator
 # Config
 # ─────────────────────────────────────────────────────────────────────────────
 
-VLLM_ENDPOINT   = "http://localhost:8000/v1/chat/completions"
-MODEL_NAME      = "Qwen/Qwen3-VL-4B-Instruct"  # Model specified by user
+OPENAI_MODEL_NAME = "gpt-4.5-preview"
+VLLM_MODEL_NAME   = "Qwen/Qwen3-VL-4B-Instruct"
+VLLM_ENDPOINT     = "http://localhost:8000/v1/chat/completions"
+
 OUTPUT_PATH      = "/project/def-syriani/gauransh/ift6765/data/vision_output_with_uml.parquet"
 CHECKPOINT_PATH  = "/project/def-syriani/gauransh/ift6765/data/vision_checkpoint.parquet"
 REQUEST_TIMEOUT  = 120                        # seconds per LLM call (longer for vision)
 PLANTUML_SERVER  = "https://www.plantuml.com/plantuml"
-MAX_WORKERS      = 8                          # concurrent vLLM requests per batch
 BATCH_SIZE       = 32                         # rows submitted to the server at once
+
+openai_client = OpenAI()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -74,7 +93,7 @@ def call_vllm(image_bytes: bytes) -> str | None:
     Returns the generated PlantUML string, or None on failure.
     """
     payload = json.dumps({
-        "model": MODEL_NAME,
+        "model": VLLM_MODEL_NAME,
         "messages": build_messages(image_bytes),
         "temperature": 0.0,
         "max_tokens": 8192,
@@ -104,12 +123,46 @@ def call_vllm(image_bytes: bytes) -> str | None:
     return None
 
 # ─────────────────────────────────────────────────────────────────────────────
+# OpenAI call
+# ─────────────────────────────────────────────────────────────────────────────
+
+@retry(
+    wait=wait_random_exponential(min=1, max=60), 
+    stop=stop_after_attempt(6),
+    retry=retry_if_exception_type((openai.RateLimitError, openai.APIConnectionError, openai.InternalServerError))
+)
+def call_openai_vision_with_retry(image_bytes: bytes) -> str:
+    response = openai_client.chat.completions.create(
+        model=OPENAI_MODEL_NAME,
+        messages=build_messages(image_bytes),
+        temperature=0.0,
+        max_tokens=8192,
+        timeout=REQUEST_TIMEOUT
+    )
+    return response.choices[0].message.content
+
+
+def call_openai_vision(image_bytes: bytes) -> str | None:
+    """
+    Sends the image to the official OpenAI API endpoint.
+    Returns the generated PlantUML string, or None on failure.
+    """
+    try:
+        content = call_openai_vision_with_retry(image_bytes)
+        # Strip any residual <think>…</think> block
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+        return content.strip()
+    except Exception as e:
+        log.error(f"OpenAI call failed after retries: {e}")
+        return None
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Per-row processing
 # ─────────────────────────────────────────────────────────────────────────────
 
 validator = PlantUMLWebValidator(server=PLANTUML_SERVER)
 
-def process_row(image_bytes: bytes) -> dict:
+def process_row(image_bytes: bytes, provider: str = "vllm") -> dict:
     """
     Returns a dict with keys:
       uml_code        - generated PlantUML string (or empty string on LLM failure)
@@ -120,7 +173,11 @@ def process_row(image_bytes: bytes) -> dict:
     result = {"uml_code": "", "uml_valid": False, "uml_error": "", "llm_failed": False}
 
     # ── 1. LLM conversion ────────────────────────────────────────────────────
-    uml_code = call_vllm(image_bytes)
+    if provider == "openai":
+        uml_code = call_openai_vision(image_bytes)
+    else:
+        uml_code = call_vllm(image_bytes)
+        
     if uml_code is None:
         result["uml_valid"]  = False
         result["llm_failed"] = True
@@ -150,7 +207,7 @@ def process_row(image_bytes: bytes) -> dict:
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
-def main():
+def main(provider: str, max_workers: int):
     # ── Load data ─────────────────────────────────────────────────────────────
     # Exclude checkpoint and output files from the input glob
     all_parquet = glob.glob("/project/def-syriani/gauransh/ift6765/data/*.parquet")
@@ -216,9 +273,9 @@ def main():
             row_start = max(start, n_done)
             batch     = image_bytes_list[row_start:end]
 
-            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
-                    executor.submit(process_row, img_bytes): row_start + i
+                    executor.submit(process_row, img_bytes, provider): row_start + i
                     for i, img_bytes in enumerate(batch)
                 }
                 for future in as_completed(futures):
@@ -270,4 +327,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Convert images to UML PlantUML")
+    parser.add_argument("--provider", choices=["vllm", "openai"], default="vllm", 
+                        help="Choose the model provider (vllm or openai, defaults to vllm)")
+    parser.add_argument("--workers", type=int, default=None,
+                        help="Max concurrent workers (defaults to 8 for vllm, 4 for openai)")
+    args = parser.parse_args()
+
+    max_concurrent = args.workers if args.workers is not None else (8 if args.provider == "vllm" else 4)
+    main(provider=args.provider, max_workers=max_concurrent)

@@ -1,3 +1,14 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "pandas",
+#     "pyarrow",
+#     "tqdm",
+#     "openai",
+#     "tenacity"
+# ]
+# ///
+
 import os
 import re
 import pandas as pd
@@ -6,9 +17,14 @@ import json
 import logging
 import urllib.request
 import urllib.error
+import argparse
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+
+from openai import OpenAI
+import openai
+from tenacity import retry, wait_random_exponential, stop_after_attempt, retry_if_exception_type
 
 from utils.UML import PlantUMLWebValidator
 
@@ -16,12 +32,16 @@ from utils.UML import PlantUMLWebValidator
 # Config
 # ─────────────────────────────────────────────────────────────────────────────
 
-VLLM_ENDPOINT   = "http://localhost:8000/v1/chat/completions"
-MODEL_NAME       = "openai/gpt-oss-120b"
+OPENAI_MODEL_NAME = "gpt-4.5-preview"
+VLLM_MODEL_NAME   = "openai/gpt-oss-120b"
+VLLM_ENDPOINT     = "http://localhost:8000/v1/chat/completions"
+
 REQUEST_TIMEOUT  = 60                          # seconds per LLM call
 PLANTUML_SERVER  = "https://www.plantuml.com/plantuml"
-MAX_WORKERS      = 8                           # concurrent vLLM requests per batch
-BATCH_SIZE       = 64                          # rows submitted to the server at once
+BATCH_SIZE       = 32                          # rows saved to checkpoint at once
+
+# Initialize OpenAI client (relies on OPENAI_API_KEY environment variable)
+openai_client = OpenAI()
 
 DATA_DIR         = "/project/def-syriani/gauransh/ift6765/data"
 OUTPUT_DIR       = "/project/def-syriani/gauransh/ift6765/output"
@@ -76,7 +96,7 @@ def call_vllm(tikz_code: str) -> str | None:
     Returns the generated PlantUML string, or None on failure.
     """
     payload = json.dumps({
-        "model": MODEL_NAME,
+        "model": VLLM_MODEL_NAME,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": build_user_prompt(tikz_code)},
@@ -109,12 +129,50 @@ def call_vllm(tikz_code: str) -> str | None:
     return None
 
 # ─────────────────────────────────────────────────────────────────────────────
+# OpenAI call
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@retry(
+    wait=wait_random_exponential(min=1, max=60), 
+    stop=stop_after_attempt(6),
+    retry=retry_if_exception_type((openai.RateLimitError, openai.APIConnectionError, openai.InternalServerError))
+)
+def call_openai_with_retry(tikz_code: str) -> str:
+    """Makes rate-limited calls to OpenAI Chat Completions"""
+    response = openai_client.chat.completions.create(
+        model=OPENAI_MODEL_NAME,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": build_user_prompt(tikz_code)},
+        ],
+        temperature=0.0,
+        max_tokens=8192,
+        timeout=REQUEST_TIMEOUT
+    )
+    return response.choices[0].message.content
+
+def call_openai(tikz_code: str) -> str | None:
+    """
+    Sends tikz_code to the official OpenAI API with retries on rate limits.
+    Returns the generated PlantUML string, or None on failure.
+    """
+    try:
+        content = call_openai_with_retry(tikz_code)
+        # Strip any think block just in case
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+        return content.strip()
+    except Exception as e:
+        log.error(f"OpenAI call failed after retries: {e}")
+        return None
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Per-row processing
 # ─────────────────────────────────────────────────────────────────────────────
 
 validator = PlantUMLWebValidator(server=PLANTUML_SERVER)
 
-def process_row(tikz_code: str) -> dict:
+def process_row(tikz_code: str, provider: str = "vllm") -> dict:
     """
     Returns a dict with keys:
       uml_code        - generated PlantUML string (or empty string on LLM failure)
@@ -125,7 +183,11 @@ def process_row(tikz_code: str) -> dict:
     result = {"uml_code": "", "uml_valid": False, "uml_error": "", "llm_failed": False}
 
     # ── 1. LLM conversion ────────────────────────────────────────────────────
-    uml_code = call_vllm(tikz_code)
+    if provider == "openai":
+        uml_code = call_openai(tikz_code)
+    else:
+        uml_code = call_vllm(tikz_code)
+        
     if uml_code is None:
         result["uml_valid"]  = False
         result["llm_failed"] = True
@@ -155,7 +217,7 @@ def process_row(tikz_code: str) -> dict:
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
-def main():
+def main(provider: str, max_workers: int):
     log.info(f"Run ID      : {RUN_ID}")
     log.info(f"Output      : {OUTPUT_PATH}")
     log.info(f"Checkpoint  : {CHECKPOINT_PATH}")
@@ -218,9 +280,9 @@ def main():
             row_start = max(start, n_done)
             batch     = tikz_codes[row_start:end]
 
-            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
-                    executor.submit(process_row, str(code)): row_start + i
+                    executor.submit(process_row, str(code), provider): row_start + i
                     for i, code in enumerate(batch)
                 }
                 for future in as_completed(futures):
@@ -269,4 +331,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Convert TikZ to PlantUML")
+    parser.add_argument("--provider", choices=["vllm", "openai"], default="vllm", 
+                        help="Choose the model provider (vllm or openai, defaults to vllm)")
+    parser.add_argument("--workers", type=int, default=None,
+                        help="Max concurrent workers (defaults to 8 for vllm, 4 for openai)")
+    args = parser.parse_args()
+
+    max_concurrent = args.workers if args.workers is not None else (8 if args.provider == "vllm" else 4)
+
+    main(provider=args.provider, max_workers=max_concurrent)
