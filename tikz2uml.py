@@ -34,7 +34,7 @@ from utils.UML import PlantUMLWebValidator
 # Config
 # ─────────────────────────────────────────────────────────────────────────────
 
-OPENAI_MODEL_NAME = "gpt-4.5-preview"
+OPENAI_MODEL_NAME = "gpt-5.4"
 VLLM_MODEL_NAME   = "openai/gpt-oss-120b"
 VLLM_ENDPOINT     = "http://localhost:8000/v1/chat/completions"
 
@@ -232,10 +232,143 @@ def process_row(tikz_code: str, provider: str = "vllm") -> dict:
     return result
 
 # ─────────────────────────────────────────────────────────────────────────────
+# OpenAI Batch Logic
+# ─────────────────────────────────────────────────────────────────────────────
+
+def submit_openai_batch(df: pd.DataFrame, output_dir: str, run_id: str):
+    jsonl_path = f"{output_dir}/batch_requests_{run_id}.jsonl"
+    log.info(f"Generating JSONL payload for batch API to {jsonl_path}...")
+    
+    requests = []
+    for idx, row in df.iterrows():
+        req = {
+            "custom_id": f"req_{idx}",
+            "method": "POST",
+            "url": "/v1/chat/completions",
+            "body": {
+                "model": OPENAI_MODEL_NAME,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": build_user_prompt(row["tikz_code"])}
+                ],
+                "temperature": 0.0
+            }
+        }
+        requests.append(req)
+        
+    with open(jsonl_path, "w", encoding="utf-8") as f:
+        for r in requests:
+            f.write(json.dumps(r) + "\n")
+            
+    log.info("Uploading file to OpenAI...")
+    batch_input_file = openai_client.files.create(
+      file=open(jsonl_path, "rb"),
+      purpose="batch"
+    )
+    
+    log.info(f"Uploaded file ID: {batch_input_file.id}")
+    log.info("Submitting batch job...")
+    batch = openai_client.batches.create(
+        input_file_id=batch_input_file.id,
+        endpoint="/v1/chat/completions",
+        completion_window="24h",
+        metadata={
+          "description": "tikz2uml batch"
+        }
+    )
+    
+    log.info(f"Batch submitted successfully! Batch ID: {batch.id}")
+    batch_file_path = f"{output_dir}/.batch_job_id"
+    with open(batch_file_path, "w") as f:
+        f.write(batch.id)
+    log.info(f"Batch ID saved to {batch_file_path} for retrieval.")
+    log.info("Run the script again with `--mode retrieve` later to check status.")
+
+
+def retrieve_openai_batch(df: pd.DataFrame, output_path: str, output_dir: str, max_workers: int):
+    batch_file_path = f"{output_dir}/.batch_job_id"
+    if not os.path.exists(batch_file_path):
+        log.error(f"Batch ID file not found at {batch_file_path}. Did you run --mode submit?")
+        return
+        
+    with open(batch_file_path, "r") as f:
+        batch_id = f.read().strip()
+        
+    log.info(f"Retrieving batch status for ID: {batch_id}")
+    try:
+        batch = openai_client.batches.retrieve(batch_id)
+        log.info(f"Batch Status: {batch.status}")
+    except Exception as e:
+        log.error(f"Failed to retrieve batch: {e}")
+        return
+    
+    if batch.status != "completed":
+        log.warning(f"Batch is not completed yet.")
+        return
+        
+    if not batch.output_file_id:
+        log.error("Batch completed but no output_file_id was found!")
+        return
+        
+    log.info("Downloading results...")
+    content = openai_client.files.content(batch.output_file_id).text
+    
+    results_map = {}
+    for line in content.strip().split("\n"):
+        if not line:
+            continue
+        obj = json.loads(line)
+        idx_str = obj["custom_id"].split("_")[1]
+        idx = int(idx_str)
+        
+        if obj["response"]["status_code"] == 200:
+            msg = obj["response"]["body"]["choices"][0]["message"]["content"]
+            msg = re.sub(r"<think>.*?</think>", "", msg, flags=re.DOTALL).strip()
+            results_map[idx] = msg
+        else:
+            log.warning(f"Row {idx} failed in batch response.")
+            results_map[idx] = None
+            
+    log.info("Validating PlantUML logic via Web API...")
+    n_total = len(df)
+    results = [None] * n_total
+    
+    def validate_row(idx, code):
+        res = {"uml_code": code if code else "", "uml_valid": False, "uml_error": "", "llm_failed": False}
+        if code is None:
+            res["llm_failed"] = True
+            res["uml_error"] = "LLM failure in batch"
+            return res
+            
+        try:
+            val = validator.validate(code)
+            res["uml_valid"] = val["valid"]
+            if not val["valid"]:
+                res["uml_error"] = "; ".join(val.get("errors", []))
+        except Exception as e:
+            res["uml_error"] = f"Validator exception: {e}"
+        return res
+
+    with tqdm(total=n_total, desc="Validating UML") as pbar:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(validate_row, idx, results_map.get(idx)): idx for idx in range(n_total)}
+            for future in as_completed(futures):
+                idx = futures[future]
+                results[idx] = future.result()
+                pbar.update(1)
+                
+    results_df = pd.DataFrame(results, index=df.index)
+    df = pd.concat([df, results_df], axis=1)
+    
+    df.to_parquet(output_path, index=False)
+    log.info(f"Saved completed dataset to {output_path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
-def main(provider: str, max_workers: int):
+def main(provider: str, mode: str, max_workers: int):
     log.info(f"Run ID      : {RUN_ID}")
     log.info(f"Output      : {OUTPUT_PATH}")
     log.info(f"Checkpoint  : {CHECKPOINT_PATH}")
@@ -262,7 +395,14 @@ def main(provider: str, max_workers: int):
         f"{sorted(df['split'].unique())}"
     )
 
-    # ── Resume from checkpoint if available ───────────────────────────────────
+    if provider == "openai" and mode == "submit":
+        submit_openai_batch(df, OUTPUT_DIR, RUN_ID)
+        return
+    elif provider == "openai" and mode == "retrieve":
+        retrieve_openai_batch(df, OUTPUT_PATH, OUTPUT_DIR, max_workers)
+        return
+
+    # ── Resume from checkpoint if available (Interactive mode) ────────────────
     tikz_codes = df["tikz_code"].tolist()
     n_total    = len(tikz_codes)
     results    = [None] * n_total
@@ -354,10 +494,12 @@ if __name__ == "__main__":
                         help="Choose the model provider (vllm or openai, defaults to vllm)")
     parser.add_argument("--workers", type=int, default=None,
                         help="Max concurrent workers (defaults to 8 for vllm, 4 for openai)")
+    parser.add_argument("--mode", choices=["interactive", "submit", "retrieve"], default="interactive",
+                        help="Execution mode for openai (interactive processes row by row). Ignored for vllm.")
     parser.add_argument("--no-hpc", action="store_true", 
                         help="Use local /Tmp base path instead of HPC cluster paths")
     args = parser.parse_args()
 
     max_concurrent = args.workers if args.workers is not None else (8 if args.provider == "vllm" else 4)
 
-    main(provider=args.provider, max_workers=max_concurrent)
+    main(provider=args.provider, mode=args.mode, max_workers=max_concurrent)
