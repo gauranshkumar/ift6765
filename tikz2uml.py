@@ -5,7 +5,8 @@
 #     "pyarrow",
 #     "tqdm",
 #     "openai",
-#     "tenacity"
+#     "tenacity",
+#     "python-dotenv"
 # ]
 # ///
 
@@ -25,6 +26,7 @@ from tqdm import tqdm
 from openai import OpenAI
 import openai
 from tenacity import retry, wait_random_exponential, stop_after_attempt, retry_if_exception_type
+from dotenv import load_dotenv
 
 from utils.UML import PlantUMLWebValidator
 
@@ -40,8 +42,17 @@ REQUEST_TIMEOUT  = 60                          # seconds per LLM call
 PLANTUML_SERVER  = "https://www.plantuml.com/plantuml"
 BATCH_SIZE       = 32                          # rows saved to checkpoint at once
 
-# Initialize OpenAI client (relies on OPENAI_API_KEY environment variable)
-openai_client = OpenAI()
+# ─────────────────────────────────────────────────────────────────────────────
+# Auth / Client
+# ─────────────────────────────────────────────────────────────────────────────
+
+load_dotenv()
+api_key = os.environ.get("OPENAI_API_KEY")
+if not api_key:
+    # We only log a warning here rather than exit because user might solely be using vllm provider
+    pass 
+
+openai_client = OpenAI(api_key=api_key)
 
 DATA_DIR         = "/project/def-syriani/gauransh/ift6765/data"
 OUTPUT_DIR       = "/project/def-syriani/gauransh/ift6765/output"
@@ -147,7 +158,6 @@ def call_openai_with_retry(tikz_code: str) -> str:
             {"role": "user", "content": build_user_prompt(tikz_code)},
         ],
         temperature=0.0,
-        max_tokens=8192,
         timeout=REQUEST_TIMEOUT
     )
     return response.choices[0].message.content

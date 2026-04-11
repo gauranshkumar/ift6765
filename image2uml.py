@@ -5,7 +5,8 @@
 #     "pyarrow",
 #     "tqdm",
 #     "openai",
-#     "tenacity"
+#     "tenacity",
+#     "python-dotenv"
 # ]
 # ///
 
@@ -25,6 +26,7 @@ from tqdm import tqdm
 from openai import OpenAI
 import openai
 from tenacity import retry, wait_random_exponential, stop_after_attempt, retry_if_exception_type
+from dotenv import load_dotenv
 
 from utils.UML import PlantUMLWebValidator
 
@@ -42,7 +44,16 @@ REQUEST_TIMEOUT  = 120                        # seconds per LLM call (longer for
 PLANTUML_SERVER  = "https://www.plantuml.com/plantuml"
 BATCH_SIZE       = 32                         # rows submitted to the server at once
 
-openai_client = OpenAI()
+# ─────────────────────────────────────────────────────────────────────────────
+# Auth / Client
+# ─────────────────────────────────────────────────────────────────────────────
+
+load_dotenv()
+api_key = os.environ.get("OPENAI_API_KEY")
+if not api_key:
+    pass
+
+openai_client = OpenAI(api_key=api_key)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -79,7 +90,7 @@ def build_messages(image_bytes: bytes) -> list:
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": [
             {"type": "text", "text": "Convert this UML sketch into valid PlantUML code."},
-            {"type": "image_url", "image_url": {"url": image_url}}
+            {"type": "input_image", "image_url": {"url": image_url}}
         ]}
     ]
 
