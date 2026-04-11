@@ -11,9 +11,9 @@
 #SBATCH --job-name=tikz2uml-vllm
 #SBATCH --account=def-syriani
 #SBATCH --time=6:00:00
-#SBATCH --mem=64G
-#SBATCH --gpus-per-node=h100:4
-#SBATCH --cpus-per-task=12               # 4 CPUs per GPU
+#SBATCH --mem=32G
+#SBATCH --gpus-per-node=h100:1
+#SBATCH --cpus-per-task=6              # 4 CPUs per GPU
 #SBATCH --output=/scratch/gauransh/logs/tikz2uml-%j.out
 #SBATCH --error=/scratch/gauransh/logs/tikz2uml-%j.err
 #SBATCH --mail-user=gauransh.kumar@umontreal.ca
@@ -22,9 +22,9 @@
 # ==========================================================
 # Configuration
 # ==========================================================
-export TENSOR_PARALLEL_SIZE=4
+export TENSOR_PARALLEL_SIZE=1
 export VLLM_PORT=8000
-export VLLM_MODEL="Qwen/Qwen3-Coder-Next"
+export VLLM_MODEL="openai/gpt-oss-120b"
 export LOG_DIR="/scratch/gauransh/logs"
 
 # ==========================================================

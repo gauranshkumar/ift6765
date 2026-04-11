@@ -92,12 +92,12 @@ pip install "vllm>=0.5.1" "flashinfer-jit-cache"
 # kernel division, which Triton 3.0.0's stricter compiler rejects with:
 #   "Cannot use // with triton.language.uint32 and triton.language.int32"
 # Force the v0 engine which uses a plain PyTorch sampler path instead.
-export VLLM_USE_V1=0
+# export VLLM_USE_V1=0
 
 # FlashInfer requires a JIT build step that fails on Compute Canada.
 # FLASH_ATTN ships pre-built inside the vLLM wheel and works on H100s
 # without any compilation — use it instead.
-export VLLM_ATTENTION_BACKEND=FLASH_ATTN
+# export VLLM_ATTENTION_BACKEND=FLASH_ATTN
 # Disable GDN-specific flashinfer kernel
 # export VLLM_USE_FLASHINFER_GDN=0
 
@@ -164,9 +164,9 @@ python -m vllm.entrypoints.openai.api_server \
     --port $VLLM_PORT \
     --download-dir "$DOWNLOAD_DIR" \
     --tensor-parallel-size "$TENSOR_PARALLEL_SIZE" \
-    --max-model-len 32768 \
-    --dtype bfloat16 \
-    --disable-custom-all-reduce \
+    # --max-model-len 32768 \
+    # --dtype bfloat16 \
+    # --disable-custom-all-reduce \
     > "$VLLM_LOG" 2>&1 &
 
 VLLM_PID=$!
