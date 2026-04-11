@@ -51,7 +51,7 @@ api_key = os.environ.get("OPENAI_API_KEY")
 if not api_key:
     # We only log a warning here rather than exit because user might solely be using vllm provider
     pass 
-
+print(api_key[:4])
 openai_client = OpenAI(api_key=api_key)
 
 DATA_DIR         = "/project/def-syriani/gauransh/ift6765/data"

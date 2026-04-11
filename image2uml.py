@@ -53,6 +53,7 @@ api_key = os.environ.get("OPENAI_API_KEY")
 if not api_key:
     pass
 
+print(api_key[:4])
 openai_client = OpenAI(api_key=api_key)
 
 # ─────────────────────────────────────────────────────────────────────────────
