@@ -256,22 +256,55 @@ def submit_openai_vision_batch(df: pd.DataFrame, output_dir: str):
         }
         requests.append(req)
         
-    log.info("Splitting into chunks to avoid 413 Payload Too Large limits...")
-    CHUNK_SIZE = 500
-    batch_ids = []
+    log.info("Splitting into chunks by maximum 150MB limit to avoid 413 Payload Too Large...")
+    MAX_FILE_SIZE = 150 * 1024 * 1024  # 150 MB
+    current_chunk = []
+    current_size = 0
+    part = 0
+    chunk_files = []
     
-    for i in range(0, len(requests), CHUNK_SIZE):
-        chunk = requests[i:i + CHUNK_SIZE]
-        jsonl_path = f"{output_dir}/vision_batch_requests_{run_id}_part{i//CHUNK_SIZE}.jsonl"
-        log.info(f"Writing {len(chunk)} requests to {jsonl_path}...")
-        
+    def finalize_chunk(chunk_list, part_num):
+        jsonl_path = f"{output_dir}/vision_batch_requests_{run_id}_part{part_num}.jsonl"
         with open(jsonl_path, "w", encoding="utf-8") as f:
-            for r in chunk:
-                f.write(json.dumps(r) + "\n")
-                
-        log.info(f"Uploading file {i//CHUNK_SIZE} to OpenAI...")
+            f.write("\n".join(chunk_list) + "\n")
+        size_mb = os.path.getsize(jsonl_path) / (1024 * 1024)
+        chunk_files.append((jsonl_path, size_mb, len(chunk_list)))
+        
+    for r in requests:
+        req_str = json.dumps(r)
+        req_size = len(req_str.encode("utf-8")) + 1  # +1 for newline
+        
+        if current_size + req_size > MAX_FILE_SIZE and current_chunk:
+            finalize_chunk(current_chunk, part)
+            part += 1
+            current_chunk = []
+            current_size = 0
+            
+        current_chunk.append(req_str)
+        current_size += req_size
+        
+    if current_chunk:
+        finalize_chunk(current_chunk, part)
+
+    print("\n" + "="*50)
+    print("BATCH UPLOAD PLAN")
+    print("="*50)
+    for path, size_mb, count in chunk_files:
+        print(f"File: {os.path.basename(path)}")
+        print(f"  Requests : {count}")
+        print(f"  Size     : {size_mb:.2f} MB")
+    print("="*50)
+    
+    user_input = input("Proceed with uploading these files to OpenAI and submitting batch jobs? (y/n): ")
+    if user_input.lower() not in ['y', 'yes']:
+        log.warning("Batch submission aborted by user.")
+        return
+
+    batch_ids = []
+    for path, size_mb, count in chunk_files:
+        log.info(f"Uploading file {os.path.basename(path)} to OpenAI...")
         batch_input_file = openai_client.files.create(
-          file=open(jsonl_path, "rb"),
+          file=open(path, "rb"),
           purpose="batch"
         )
         
@@ -281,10 +314,10 @@ def submit_openai_vision_batch(df: pd.DataFrame, output_dir: str):
             endpoint="/v1/chat/completions",
             completion_window="24h",
             metadata={
-              "description": f"image2uml batch part {i//CHUNK_SIZE}"
+              "description": f"image2uml batch {os.path.basename(path)}"
             }
         )
-        log.info(f"Batch part {i//CHUNK_SIZE} submitted! Batch ID: {batch.id}")
+        log.info(f"Batch submitted! Batch ID: {batch.id}")
         batch_ids.append(batch.id)
 
     batch_file_path = f"{output_dir}/.vision_batch_job_id"
