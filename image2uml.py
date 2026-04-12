@@ -108,7 +108,7 @@ def build_messages(image_bytes: bytes) -> list:
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": [
             {"type": "text", "text": "Convert this UML sketch into valid PlantUML code."},
-            {"type": "input_image", "image_url": {"url": image_url}}
+            {"type": "image_url", "image_url": {"url": image_url}}
         ]}
     ]
 
