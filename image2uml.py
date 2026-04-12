@@ -125,7 +125,6 @@ def call_vllm(image_bytes: bytes) -> str | None:
         "model": VLLM_MODEL_NAME,
         "messages": build_messages(image_bytes),
         "temperature": 0.0,
-        "max_tokens": 8192,
     }).encode("utf-8")
 
     req = urllib.request.Request(
