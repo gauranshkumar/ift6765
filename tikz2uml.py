@@ -354,13 +354,33 @@ def retrieve_openai_batch(df: pd.DataFrame, output_path: str, output_dir: str, m
             all_completed = False
             continue
             
-        if not batch.output_file_id:
-            log.error(f"Batch {batch_id} completed but no output_file_id was found!")
+        output_file_id = getattr(batch, "output_file_id", None)
+        if not output_file_id:
+            error_file_id = getattr(batch, "error_file_id", None)
+            if error_file_id:
+                log.error(f"Job {batch_id} contains errors! Found error_file_id: {error_file_id}")
+                try:
+                    err_content = openai_client.files.content(error_file_id).text
+                    log.error(f"Errors snippet:\n{err_content[:1000]}")
+                except Exception:
+                    pass
+            else:
+                log.error(f"Batch {batch_id} completed but no output_file_id was found!")
             all_completed = False
             continue
             
-        log.info(f"Downloading results for {batch_id}...")
-        content = openai_client.files.content(batch.output_file_id).text
+        log.info(f"Downloading results for Job ID {batch_id} using Output File ID: {output_file_id}...")
+        try:
+            content = openai_client.files.content(output_file_id).text
+        except Exception as e: # fallback strictly using HTTP if SDK misbehaves
+            log.warning(f"SDK `files.content` failed ({e}), fetching manually via HTTP...")
+            import urllib.request
+            req = urllib.request.Request(
+                f"https://api.openai.com/v1/files/{output_file_id}/content",
+                headers={"Authorization": f"Bearer {api_key}"}
+            )
+            with urllib.request.urlopen(req) as response:
+                content = response.read().decode('utf-8')
         
         for line in content.strip().split("\n"):
             if not line:
