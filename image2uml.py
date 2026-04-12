@@ -164,7 +164,6 @@ def call_openai_vision_with_retry(image_bytes: bytes) -> str:
         model=OPENAI_MODEL_NAME,
         messages=build_messages(image_bytes),
         temperature=0.0,
-        max_tokens=8192,
         timeout=REQUEST_TIMEOUT
     )
     return response.choices[0].message.content
@@ -249,8 +248,7 @@ def submit_openai_vision_batch(df: pd.DataFrame, output_dir: str):
             "body": {
                 "model": OPENAI_MODEL_NAME,
                 "messages": build_messages(row["sketch_image"]["bytes"]),
-                "temperature": 0.0,
-                "max_tokens": 8192
+                "temperature": 0.0
             }
         }
         requests.append(req)
