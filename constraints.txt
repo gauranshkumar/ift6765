@@ -1,14 +1,20 @@
 # constraints.txt
-# Hard version ceilings to prevent Compute Canada dummy-wheel traps.
+# Hard version ceilings to prevent Compute Canada dummy-wheel traps AND
+# known package incompatibilities.
 #
-# Rule: whenever a CC module provides a package via --no-index, pin the
-# corresponding PyPI version to something that does NOT require a newer
-# C++ build than what the module supplies.
-#
-# arrow/17.0.0  → pyarrow 17.x is available; datasets 3.0+ needs pyarrow>=21 → cap it
+# ── PyArrow / Arrow module ────────────────────────────────────────────────────
+# arrow/17.0.0 → pyarrow 17.x; datasets 3.0+ needs pyarrow>=21 → cap it
 datasets<=2.19.0
-#
-# opencv module supplies opencv 4.x; vllm pulls opencv-python-headless which
-# triggers a build if the version isn't already satisfied via --no-index first.
-# The constraint keeps pip from trying to upgrade it independently.
+
+# ── OpenCV module ─────────────────────────────────────────────────────────────
+# opencv module supplies opencv 4.x; cap so vllm doesn't try a newer build
 opencv-python-headless<=4.10.0.84
+
+# ── transformers / vllm compatibility ─────────────────────────────────────────
+# vllm calls tokenizer.all_special_tokens_extended which was restructured in
+# transformers 4.46+.  Pin transformers below that boundary so the attribute
+# exists on Qwen2Tokenizer.
+transformers>=4.40.0,<4.46.0
+
+# vllm 0.5.x is the last series confirmed compatible with transformers <4.46
+vllm>=0.5.0,<0.6.0
