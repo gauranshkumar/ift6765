@@ -60,8 +60,7 @@ def format_qwen_vl_chat(row):
         "image_bytes": row["sketch_image"]["bytes"]  # keep as bytes, convert in collator
     }
 
-
-def load_and_prepare_dataset(parquet_path: str) -> DatasetDict:
+def load_and_prepare_dataset(parquet_path: str, test_out_path: str | None = None) -> DatasetDict:
     print(f"Loading dataset from {parquet_path}...")
     df = pd.read_parquet(parquet_path)
 
@@ -81,9 +80,9 @@ def load_and_prepare_dataset(parquet_path: str) -> DatasetDict:
     else:
         print("No predefined split found. Creating 80/10/10 train/val/test split...")
         full_ds = Dataset.from_pandas(df, preserve_index=False)
-        # First split off 20% for val+test
+        # First split off 20% for val+test  ← seed=42 MUST match training run
         train_temp = full_ds.train_test_split(test_size=0.20, seed=42)
-        # Split the 20% evenly into val and test
+        # Split the 20% evenly into val and test  ← seed=42 MUST match training run
         val_test = train_temp["test"].train_test_split(test_size=0.50, seed=42)
         ds = DatasetDict({
             "train":      train_temp["train"],
@@ -100,6 +99,11 @@ def load_and_prepare_dataset(parquet_path: str) -> DatasetDict:
             remove_columns=ds[split].column_names,
             desc=f"Formatting {split}",
         )
+
+    # Save test split to disk if a path is provided
+    if "test" in ds and test_out_path:
+        print(f"Saving test split ({len(ds['test'])} samples) → {test_out_path}")
+        ds["test"].to_parquet(test_out_path)
 
     return ds
 
@@ -165,18 +169,29 @@ def main():
                         help="Per-device batch size (effective = batch_size × gpus × grad_accum)")
     parser.add_argument("--no-hpc", action="store_true",
                         help="Use local /Tmp/kumargau paths instead of Compute Canada paths")
+    parser.add_argument("--export-test-split", action="store_true",
+                        help="Only export the test split parquet and exit — no training")
     args = parser.parse_args()
 
-    BASE_DIR = "/Tmp/kumargau/ift6765" if args.no_hpc else "/project/def-syriani/gauransh/ift6765"
+    BASE_DIR      = "/Tmp/kumargau/ift6765" if args.no_hpc else "/project/def-syriani/gauransh/ift6765"
     INPUT_PARQUET = f"{BASE_DIR}/output/image2uml_20260412_190600.parquet"
     OUTPUT_DIR    = f"{BASE_DIR}/output/qwen_lora_finetuned"
+    TEST_OUT_PATH = f"{BASE_DIR}/output/qwen_lora_test_split.parquet"
 
     if not os.path.exists(INPUT_PARQUET):
         print(f"[ERROR] Training data not found: {INPUT_PARQUET}")
         return
 
+    # ── Export-only mode ─────────────────────────────────────────────────────
+    # Uses the identical seed=42 split as training — guaranteed reproducibility.
+    if args.export_test_split:
+        print("[--export-test-split] Generating test split without training...")
+        load_and_prepare_dataset(INPUT_PARQUET, test_out_path=TEST_OUT_PATH)
+        print(f"[--export-test-split] Done. Test split saved to {TEST_OUT_PATH}")
+        return
+
     # ── Dataset ──────────────────────────────────────────────────────────────
-    ds = load_and_prepare_dataset(INPUT_PARQUET)
+    ds = load_and_prepare_dataset(INPUT_PARQUET, test_out_path=TEST_OUT_PATH)
     train_dataset = ds.get("train", next(iter(ds.values())))
     eval_dataset  = ds.get("validation", ds.get("test", None))
 

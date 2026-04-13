@@ -73,6 +73,11 @@ pip install -c "$BASEDIR/cc_constraints.txt" \
 echo "[INFO] Jumping to execution directory..."
 cd "$BASEDIR"
 
+# Load W&B API key from $BASEDIR/.env (never commit this file).
+# shellcheck disable=SC1090
+[ -f "$BASEDIR/.env" ] && source "$BASEDIR/.env" && echo "[INFO] Loaded env from $BASEDIR/.env"
+export WANDB_PROJECT="ift6765-image2uml"
+
 echo "=========================================================="
 echo "Triggering Distributed Training (2x GPUs, DDP)"
 echo "=========================================================="
