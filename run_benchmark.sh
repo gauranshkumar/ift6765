@@ -44,9 +44,9 @@ CONSTRAINTS="/project/def-syriani/gauransh/ift6765/constraints.txt"
 pip install --upgrade pip wheel setuptools --quiet
 pip install --no-index torch torchvision torchaudio || pip install torch torchvision torchaudio
 pip install --no-index pyarrow || true
-pip install --no-index opencv-python-headless || true   # CC pre-compiled wheel linked against loaded opencv module
+# Use CC's prebuilt vllm wheel — it includes a compatible opencv build internally
+pip install --no-index vllm || pip install -c "$CONSTRAINTS" vllm
 pip install -c "$CONSTRAINTS" transformers peft accelerate pillow pandas python-dotenv
-pip install -c "$CONSTRAINTS" vllm
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR="/project/def-syriani/gauransh/ift6765"

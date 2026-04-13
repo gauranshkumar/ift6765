@@ -7,8 +7,9 @@
 datasets<=2.19.0
 
 # ── OpenCV module ─────────────────────────────────────────────────────────────
-# opencv module supplies opencv 4.x; cap so vllm doesn't try a newer build
-opencv-python-headless<=4.10.0.84
+# opencv is managed by the CC custom vllm wheel — do NOT cap it here.
+# Load the opencv module before venv activation and install via --no-index;
+# the CC vllm wheel will satisfy opencv>=4.11 from that pre-built wheel.
 
 # ── transformers / vllm compatibility ─────────────────────────────────────────
 # Qwen3-VL (qwen3_vl architecture) was added in transformers 4.51.0.
