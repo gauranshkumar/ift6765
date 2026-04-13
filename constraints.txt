@@ -11,10 +11,10 @@ datasets<=2.19.0
 opencv-python-headless<=4.10.0.84
 
 # ── transformers / vllm compatibility ─────────────────────────────────────────
-# vllm calls tokenizer.all_special_tokens_extended which was restructured in
-# transformers 4.46+.  Pin transformers below that boundary so the attribute
-# exists on Qwen2Tokenizer.
-transformers>=4.40.0,<4.46.0
+# Qwen3-VL (qwen3_vl architecture) was added in transformers 4.51.0.
+# vllm 0.8+ rewrote the tokenizer integration and no longer calls the old
+# all_special_tokens_extended attribute — fixing both errors at once.
+transformers>=4.51.0
 
-# vllm 0.5.x is the last series confirmed compatible with transformers <4.46
-vllm>=0.5.0,<0.6.0
+# vllm 0.8+ has native Qwen3-VL support and works with transformers >=4.51
+vllm>=0.8.0,<0.9.0

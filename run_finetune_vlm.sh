@@ -62,7 +62,7 @@ echo "[INFO] Pinning pyarrow to: $(cat "$BASEDIR/cc_constraints.txt")"
 CONSTRAINTS="$BASEDIR/constraints.txt"
 
 pip install -c "$BASEDIR/cc_constraints.txt" -c "$CONSTRAINTS" \
-    "transformers>=4.45.0" \
+    "transformers>=4.51.0" \
     "datasets>=2.14.0,<3.0.0" \
     "trl>=0.11.0,<0.14.0" \
     peft \
