@@ -19,13 +19,16 @@ LOG_FILE="/scratch/gauransh/logs/finetune_vlm_exec_$(date +%Y%m%d_%H%M%S)_$$.log
 exec > >(tee -i "$LOG_FILE") 2>&1
 
 echo "=========================================================="
-echo "Starting VLM QLoRA Fine-tuning Setup (2x GPUs)"
+echo "Starting VLM QLoRA Fine-tuning Setup (2x H100 GPUs)"
 echo "=========================================================="
 
 echo "[INFO] Loading Compute Canada core modules..."
 module load StdEnv/2023    2>/dev/null || echo "[WARN] StdEnv/2023 not found"
 module load gcc            2>/dev/null || echo "[WARN] gcc not found"
 module load cuda/12.2      2>/dev/null || echo "[WARN] cuda/12.2 not found"
+# IMPORTANT: arrow MUST be loaded before venv activation so that the CC-provided
+# pyarrow wheel is linkable. Loading it after activation causes the dummy-wheel
+# build error.
 module load arrow/17.0.0   2>/dev/null || echo "[WARN] arrow/17.0.0 not found"
 module load python/3.11    2>/dev/null || echo "[WARN] python/3.11 not found"
 
@@ -39,24 +42,32 @@ echo "[INFO] Upgrading standard build dependencies..."
 pip install --upgrade pip wheel setuptools
 
 echo "[INFO] Installing PyTorch..."
-# Prioritizing fast local ComputeCanada wheels first, falling back to network
 pip install --no-index torch torchvision torchaudio || pip install torch torchvision torchaudio
 
-echo "[INFO] Linking isolated ComputeCanada Modules (PyArrow/Pandas)..."
-pip install --no-index pyarrow pandas || pip install pyarrow pandas
+echo "[INFO] Installing pyarrow from CC local wheel (must come before datasets)..."
+# --no-index forces pip to use the CC-provided wheel that links against the loaded
+# arrow/17.0.0 module. Installing this first means datasets won't try to pull
+# pyarrow from PyPI (which triggers the dummy-wheel build error).
+pip install --no-index pyarrow
 
-echo "[INFO] Installing HuggingFace distributed training frameworks + WandB..."
-# bitsandbytes handles massive multi-GPU scaling structures even without quantization
-pip install transformers peft trl datasets accelerate bitsandbytes pillow wandb python-dotenv
+echo "[INFO] Installing HuggingFace stack + WandB..."
+pip install transformers peft trl accelerate bitsandbytes pillow wandb python-dotenv datasets
 
 echo "[INFO] Jumping to execution directory..."
 cd /project/def-syriani/gauransh/ift6765
 
 echo "=========================================================="
-echo "Triggering Distributed Accelerated Execution "
+echo "Triggering Distributed Training (2x GPUs, DDP)"
 echo "=========================================================="
-# Accelerate will natively detect the 2 GPUs implicitly due to device_map and DP setups
-accelerate launch finetune_vlm.py --epochs 8 --batch-size 8
+# --num_processes=2  → one process per GPU (DDP)
+# --mixed_precision=bf16 → use bfloat16 amp natively on H100
+# Do NOT use device_map="auto" in the Python script when launching this way.
+accelerate launch \
+    --num_processes=2 \
+    --num_machines=1 \
+    --mixed_precision=bf16 \
+    --dynamo_backend=no \
+    finetune_vlm.py --epochs 8 --batch-size 4
 
 echo "=========================================================="
 echo "[SUCCESS] Script Execution Fully Complete"
