@@ -39,6 +39,8 @@ echo "[INFO] Building virtual environment -> $ENV_DIR"
 python3 -m venv "$ENV_DIR"
 source "$ENV_DIR/bin/activate"
 
+CONSTRAINTS="/project/def-syriani/gauransh/ift6765/constraints.txt"
+
 pip install --upgrade pip wheel setuptools --quiet
 
 # torch (CPU-only build is fine for data processing — much smaller download)
@@ -46,7 +48,7 @@ pip install --no-index torch || pip install torch --index-url https://download.p
 
 echo "[INFO] Installing data + HuggingFace packages..."
 pip install --no-index pyarrow || true
-pip install pandas "datasets<=2.19.0" transformers pillow python-dotenv
+pip install -c "$CONSTRAINTS" pandas datasets transformers pillow python-dotenv
 
 # ── Run export ────────────────────────────────────────────────────────────────
 PROJECT_DIR="/project/def-syriani/gauransh/ift6765"

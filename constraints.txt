@@ -1,0 +1,14 @@
+# constraints.txt
+# Hard version ceilings to prevent Compute Canada dummy-wheel traps.
+#
+# Rule: whenever a CC module provides a package via --no-index, pin the
+# corresponding PyPI version to something that does NOT require a newer
+# C++ build than what the module supplies.
+#
+# arrow/17.0.0  → pyarrow 17.x is available; datasets 3.0+ needs pyarrow>=21 → cap it
+datasets<=2.19.0
+#
+# opencv module supplies opencv 4.x; vllm pulls opencv-python-headless which
+# triggers a build if the version isn't already satisfied via --no-index first.
+# The constraint keeps pip from trying to upgrade it independently.
+opencv-python-headless<=4.10.0.84

@@ -29,6 +29,8 @@ module load StdEnv/2023    2>/dev/null || echo "[WARN] StdEnv/2023 not found"
 module load gcc            2>/dev/null || echo "[WARN] gcc not found"
 module load cuda/12.2      2>/dev/null || echo "[WARN] cuda/12.2 not found"
 module load arrow/17.0.0   2>/dev/null || echo "[WARN] arrow/17.0.0 not found"
+# opencv MUST be loaded before venv activation (same pattern as arrow/pyarrow)
+module load opencv         2>/dev/null || echo "[WARN] opencv not found"
 module load python/3.11    2>/dev/null || echo "[WARN] python/3.11 not found"
 
 # ── Virtual environment ───────────────────────────────────────────────────────
@@ -37,10 +39,14 @@ echo "[INFO] Building virtual environment -> $ENV_DIR"
 python3 -m venv "$ENV_DIR"
 source "$ENV_DIR/bin/activate"
 
+CONSTRAINTS="/project/def-syriani/gauransh/ift6765/constraints.txt"
+
 pip install --upgrade pip wheel setuptools --quiet
 pip install --no-index torch torchvision torchaudio || pip install torch torchvision torchaudio
 pip install --no-index pyarrow || true
-pip install transformers peft accelerate vllm pillow pandas python-dotenv
+pip install --no-index opencv-python-headless || true   # CC pre-compiled wheel linked against loaded opencv module
+pip install -c "$CONSTRAINTS" transformers peft accelerate pillow pandas python-dotenv
+pip install -c "$CONSTRAINTS" vllm
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR="/project/def-syriani/gauransh/ift6765"
