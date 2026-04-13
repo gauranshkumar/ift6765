@@ -51,10 +51,32 @@ echo "[INFO] Installing pyarrow from CC local wheel (must come before datasets).
 pip install --no-index pyarrow
 
 echo "[INFO] Installing HuggingFace stack + WandB..."
-pip install transformers peft trl accelerate bitsandbytes pillow wandb python-dotenv datasets
+# Write a constraints file that locks pyarrow to the version just installed
+# from the CC Arrow module. The -c flag prevents pip from upgrading pyarrow
+# when resolving datasets (which on PyPI now requires pyarrow>=21.0.0).
+BASEDIR="/project/def-syriani/gauransh/ift6765"
+
+echo "pyarrow==$(python -c 'import pyarrow; print(pyarrow.__version__)')" > "$BASEDIR/cc_constraints.txt"
+echo "[INFO] Pinning pyarrow to: $(cat "$BASEDIR/cc_constraints.txt")"
+
+pip install -c "$BASEDIR/cc_constraints.txt" \
+    "transformers>=4.45.0" \
+    "datasets>=2.14.0,<3.0.0" \
+    "trl>=0.11.0,<0.14.0" \
+    peft \
+    accelerate \
+    bitsandbytes \
+    pillow \
+    wandb \
+    python-dotenv
 
 echo "[INFO] Jumping to execution directory..."
-cd /project/def-syriani/gauransh/ift6765
+cd "$BASEDIR"
+
+# Load W&B API key from $BASEDIR/.env (never commit this file).
+# shellcheck disable=SC1090
+[ -f "$BASEDIR/.env" ] && source "$BASEDIR/.env" && echo "[INFO] Loaded env from $BASEDIR/.env"
+export WANDB_PROJECT="ift6765-image2uml"
 
 echo "=========================================================="
 echo "Triggering Distributed Training (2x GPUs, DDP)"
