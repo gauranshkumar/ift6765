@@ -19,15 +19,12 @@
 import os
 import argparse
 import pandas as pd
-import torch
 from dotenv import load_dotenv
 from io import BytesIO
 from PIL import Image
 from datasets import Dataset, DatasetDict
-from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+from transformers import AutoProcessor
 from transformers.trainer_utils import get_last_checkpoint
-from peft import LoraConfig, get_peft_model
-from trl import SFTTrainer, SFTConfig
 
 QWEN_MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
 
@@ -194,6 +191,12 @@ def main():
     ds = load_and_prepare_dataset(INPUT_PARQUET, test_out_path=TEST_OUT_PATH)
     train_dataset = ds.get("train", next(iter(ds.values())))
     eval_dataset  = ds.get("validation", ds.get("test", None))
+
+    # ── Training-only imports (not needed for --export-test-split) ───────────
+    import torch
+    from transformers import Qwen3VLForConditionalGeneration
+    from peft import LoraConfig, get_peft_model
+    from trl import SFTTrainer, SFTConfig
 
     # ── Processor & Model ────────────────────────────────────────────────────
     print("Loading processor and model in bfloat16...")
