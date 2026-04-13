@@ -3,7 +3,7 @@
 #SBATCH --account=def-syriani
 #SBATCH --time=12:00:00
 #SBATCH --nodes=1
-#SBATCH --gpus-per-node=2
+#SBATCH --gpus-per-node=h100:2
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
 #SBATCH --output=/scratch/gauransh/logs/finetune_vlm_%j.out
@@ -45,7 +45,7 @@ echo "=========================================================="
 echo "Triggering Distributed Accelerated Execution "
 echo "=========================================================="
 # Accelerate will natively detect the 2 GPUs implicitly due to device_map and DP setups
-accelerate launch finetune_vlm.py --epochs 3 --batch-size 8
+accelerate launch finetune_vlm.py --epochs 8 --batch-size 8
 
 echo "=========================================================="
 echo "[SUCCESS] Script Execution Fully Complete"

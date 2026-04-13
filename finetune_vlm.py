@@ -114,7 +114,7 @@ def main():
     load_dotenv()
 
     parser = argparse.ArgumentParser(description="Fine-tune Qwen-VL architecture using QLoRA")
-    parser.add_argument("--epochs", type=int, default=3, help="Number of training epochs")
+    parser.add_argument("--epochs", type=int, default=8, help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=8, help="Per device batch size (increased for H100s)")
     parser.add_argument("--no-hpc", action="store_true", help="Use local /Tmp/kumargau paths instead of Compute Canada paths")
     args = parser.parse_args()
@@ -172,8 +172,10 @@ def main():
         num_train_epochs=args.epochs,
         max_seq_length=4096,                   
         dataset_kwargs={"skip_prepare_dataset": True},
-        report_to="wandb",                     # Enable explicit Weights & Biases logging
-        run_name="image2uml-qwen-vl-lora"      # Organized Run label for dashboard
+        report_to="wandb",                     
+        run_name="image2uml-qwen-vl-lora",      
+        load_best_model_at_end=True,           # Automatically restore best tracking metric on finish
+        metric_for_best_model="eval_loss"
     )
 
     trainer = SFTTrainer(
