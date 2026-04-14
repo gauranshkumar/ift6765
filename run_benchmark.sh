@@ -39,6 +39,12 @@ ENV_DIR="${SLURM_TMPDIR:-/tmp}/vlm_benchmark_env"
 echo "[INFO] Building virtual environment -> $ENV_DIR"
 python3 -m venv "$ENV_DIR"
 source "$ENV_DIR/bin/activate"
+# CC's python/3.11 or StdEnv sets PYTHONPATH to include scipy-stack/2024a.
+# That system scipy/pandas was compiled against CC's numpy and causes ABI
+# mismatches ("numpy.dtype size changed", "numpy.core.multiarray failed to
+# import") when mixed with the venv's numpy.  Clearing PYTHONPATH after venv
+# activation ensures only the venv's own site-packages are used.
+unset PYTHONPATH
 
 CONSTRAINTS="/project/def-syriani/gauransh/ift6765/constraints.txt"
 
