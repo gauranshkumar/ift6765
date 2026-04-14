@@ -25,13 +25,21 @@ echo "=========================================================="
 
 # ── Module loading ────────────────────────────────────────────────────────────
 echo "[INFO] Loading modules..."
+# Purge ALL modules first to evict any user-default modules that SLURM inherits
+# from ~/.bashrc (e.g. an older or newer scipy-stack version).  Then reload
+# scipy-stack explicitly so we control the exact version.
+module --force purge
 module load StdEnv/2023    2>/dev/null || echo "[WARN] StdEnv/2023 not found"
 module load gcc            2>/dev/null || echo "[WARN] gcc not found"
 module load cuda/12.2      2>/dev/null || echo "[WARN] cuda/12.2 not found"
 module load arrow/17.0.0   2>/dev/null || echo "[WARN] arrow/17.0.0 not found"
 # opencv MUST be loaded before venv activation so the CC vllm wheel can satisfy
-# its opencv-python-headless>=4.11 requirement from the system wheel, not PyPI.
+# its opencv-python-headless requirement from the system module, not PyPI.
 module load opencv         2>/dev/null || echo "[WARN] opencv not found"
+# CC recommends loading scipy-stack rather than pip-installing scipy/numpy/pandas.
+# Loading it here (after purge) also makes the matching --no-index wheels
+# available so we can install the identical ABI into the venv.
+module load scipy-stack    2>/dev/null || echo "[WARN] scipy-stack not found"
 module load python/3.11    2>/dev/null || echo "[WARN] python/3.11 not found"
 
 # ── Virtual environment ───────────────────────────────────────────────────────
@@ -39,25 +47,15 @@ ENV_DIR="${SLURM_TMPDIR:-/tmp}/vlm_benchmark_env"
 echo "[INFO] Building virtual environment -> $ENV_DIR"
 python3 -m venv "$ENV_DIR"
 source "$ENV_DIR/bin/activate"
-# CC's python/3.11 sets PYTHONPATH to include scipy-stack/2024a, whose
-# scipy/pandas were compiled against CC's numpy and cause ABI mismatches
-# ("numpy.dtype size changed", "numpy.core.multiarray failed to import")
-# when mixed with the venv's numpy.
-# Strip ONLY scipy-stack entries; keep everything else (the opencv module
-# adds cv2 bindings here and vllm needs them at runtime).
-if [[ -n "${PYTHONPATH:-}" ]]; then
-    _clean_pp=""
-    while IFS= read -r _entry; do
-        [[ -z "$_entry" || "$_entry" == *scipy-stack* ]] && continue
-        _clean_pp="${_clean_pp:+${_clean_pp}:}${_entry}"
-    done <<< "${PYTHONPATH//:/$'\n'}"
-    export PYTHONPATH="$_clean_pp"
-    unset _clean_pp _entry
-fi
 
 CONSTRAINTS="/project/def-syriani/gauransh/ift6765/constraints.txt"
 
 pip install --upgrade pip wheel setuptools --quiet
+# Install CC's numpy/scipy/pandas into the venv from the local wheel cache.
+# These are the SAME binaries the loaded scipy-stack module provides, so the
+# ABI is guaranteed to match CC's vllm wheel (also compiled against CC's numpy).
+# Doing this BEFORE vllm prevents pip from pulling a different numpy from PyPI.
+pip install --no-index numpy scipy pandas
 pip install --no-index torch torchvision torchaudio || pip install torch torchvision torchaudio
 pip install --no-index pyarrow || true
 
@@ -79,11 +77,14 @@ print(f"[stub] opencv-python-headless 4.13.0 stubbed at {dist_info}")
 PYSTUB
 
 pip install --no-index vllm || pip install -c "$CONSTRAINTS" vllm
-pip install -c "$CONSTRAINTS" peft accelerate pillow pandas python-dotenv
+pip install -c "$CONSTRAINTS" peft accelerate pillow python-dotenv
 # qwen3_vl / Qwen3VLForConditionalGeneration requires transformers >=4.51.
 # 4.51.0 has a tokenizer regression ('list has no attribute keys'); fixed in 4.51.1.
 # Force-reinstall AFTER vllm so its transitive dep resolution cannot override the pin.
-pip install --force-reinstall "transformers>=4.51.1"
+# Pin to 4.51.x: 4.51.0 has the 'list has no attribute keys' tokenizer bug
+# (fixed in 4.51.1); cap below 4.52 to avoid API changes that could break
+# vLLM 0.8.x which was written against transformers 4.47-4.50.
+pip install --force-reinstall "transformers>=4.51.1,<4.52.0"
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR="/project/def-syriani/gauransh/ift6765"
