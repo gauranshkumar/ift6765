@@ -58,3 +58,7 @@ saved_model/**/* filter=lfs diff=lfs merge=lfs -text
 # Video files - compressed
 *.mp4 filter=lfs diff=lfs merge=lfs -text
 *.webm filter=lfs diff=lfs merge=lfs -text
+output/benchmark_results_base.parquet filter=lfs diff=lfs merge=lfs -text
+output/benchmark_results_finetuned.parquet filter=lfs diff=lfs merge=lfs -text
+output/qwen_lora_test_split.parquet filter=lfs diff=lfs merge=lfs -text
+output/qwen_lora_finetuned filter=lfs diff=lfs merge=lfs -text
