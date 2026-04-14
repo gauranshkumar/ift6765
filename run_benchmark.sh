@@ -39,20 +39,45 @@ ENV_DIR="${SLURM_TMPDIR:-/tmp}/vlm_benchmark_env"
 echo "[INFO] Building virtual environment -> $ENV_DIR"
 python3 -m venv "$ENV_DIR"
 source "$ENV_DIR/bin/activate"
-# CC's python/3.11 or StdEnv sets PYTHONPATH to include scipy-stack/2024a.
-# That system scipy/pandas was compiled against CC's numpy and causes ABI
-# mismatches ("numpy.dtype size changed", "numpy.core.multiarray failed to
-# import") when mixed with the venv's numpy.  Clearing PYTHONPATH after venv
-# activation ensures only the venv's own site-packages are used.
-unset PYTHONPATH
+# CC's python/3.11 sets PYTHONPATH to include scipy-stack/2024a, whose
+# scipy/pandas were compiled against CC's numpy and cause ABI mismatches
+# ("numpy.dtype size changed", "numpy.core.multiarray failed to import")
+# when mixed with the venv's numpy.
+# Strip ONLY scipy-stack entries; keep everything else (the opencv module
+# adds cv2 bindings here and vllm needs them at runtime).
+if [[ -n "${PYTHONPATH:-}" ]]; then
+    _clean_pp=""
+    while IFS= read -r _entry; do
+        [[ -z "$_entry" || "$_entry" == *scipy-stack* ]] && continue
+        _clean_pp="${_clean_pp:+${_clean_pp}:}${_entry}"
+    done <<< "${PYTHONPATH//:/$'\n'}"
+    export PYTHONPATH="$_clean_pp"
+    unset _clean_pp _entry
+fi
 
 CONSTRAINTS="/project/def-syriani/gauransh/ift6765/constraints.txt"
 
 pip install --upgrade pip wheel setuptools --quiet
 pip install --no-index torch torchvision torchaudio || pip install torch torchvision torchaudio
 pip install --no-index pyarrow || true
-# Use CC's prebuilt vllm wheel (includes opencv-python-headless>=4.11 internally).
-# No version cap — the old <0.9.0 cap caused a conflict with CC's opencv wheel.
+
+# CC provides opencv via the loaded module (entries in PYTHONPATH above), not
+# via a pip-installable wheel.  Newer vllm wheels require
+# opencv-python-headless>=4.13.0; pip falls through to CC's intentionally-
+# failing dummy source tarball.  Stub out the package as a dist-info so pip's
+# resolver sees it as already installed and never touches the dummy tarball.
+python3 - <<'PYSTUB'
+import site, os
+dist_info = os.path.join(site.getsitepackages()[0],
+                         "opencv_python_headless-4.13.0.dist-info")
+os.makedirs(dist_info, exist_ok=True)
+open(os.path.join(dist_info, "METADATA"), "w").write(
+    "Metadata-Version: 2.1\nName: opencv-python-headless\nVersion: 4.13.0\n")
+open(os.path.join(dist_info, "INSTALLER"), "w").write("pip\n")
+open(os.path.join(dist_info, "RECORD"),   "w").write("")
+print(f"[stub] opencv-python-headless 4.13.0 stubbed at {dist_info}")
+PYSTUB
+
 pip install --no-index vllm || pip install -c "$CONSTRAINTS" vllm
 pip install -c "$CONSTRAINTS" peft accelerate pillow pandas python-dotenv
 # qwen3_vl / Qwen3VLForConditionalGeneration requires transformers >=4.51.
