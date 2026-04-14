@@ -15,7 +15,7 @@ Usage:
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#     "pandas", "pyarrow", "tqdm", "pillow", "python-dotenv"
+#     "pandas", "pyarrow", "tqdm", "python-dotenv"
 # ]
 # ///
 
@@ -29,10 +29,8 @@ import logging
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from io import BytesIO
 
 import pandas as pd
-from PIL import Image
 from tqdm import tqdm
 from dotenv import load_dotenv
 
@@ -134,10 +132,29 @@ def is_valid_plantuml(code: str) -> tuple[bool, str]:
 # Dataset loading
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _extract_gt_from_messages(messages) -> str:
+    """Pull the assistant text out of a messages list (finetune_vlm.py format)."""
+    if not isinstance(messages, list):
+        return ""
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    return part.get("text", "")
+    return ""
+
+
 def load_test_split(parquet_path: str) -> list[dict]:
     """
-    Supports both raw (sketch_image dict with 'bytes' key) and
-    pre-formatted (image_bytes column from finetune_vlm.py) test splits.
+    Supports three formats:
+      - finetune_vlm.py output: image_bytes + messages columns
+      - raw HF dataset:         sketch_image dict with 'bytes' key + uml_code column
+      - legacy:                 image_bytes + uml_code columns
     """
     df = pd.read_parquet(parquet_path)
     records = []
@@ -149,10 +166,13 @@ def load_test_split(parquet_path: str) -> list[dict]:
         else:
             log.warning("Row has no image column — skipping.")
             continue
-        records.append({
-            "image_bytes": img_bytes,
-            "uml_code_gt": row.get("uml_code", ""),  # ground-truth from training split
-        })
+
+        # Ground-truth: direct column takes priority; fall back to messages assistant turn
+        uml_gt = row.get("uml_code", "") or ""
+        if not uml_gt and "messages" in df.columns:
+            uml_gt = _extract_gt_from_messages(row.get("messages"))
+
+        records.append({"image_bytes": img_bytes, "uml_code_gt": uml_gt})
     log.info(f"Loaded {len(records)} test samples from {parquet_path}")
     return records
 
@@ -237,7 +257,9 @@ def main():
         {**{"uml_code_gt": rec["uml_code_gt"]}, **res}
         for rec, res in zip(records, results)
     ])
-    os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
+    out_dir = os.path.dirname(args.output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     out_df.to_parquet(args.output_path, index=False)
     log.info(f"Results saved → {args.output_path}")
 

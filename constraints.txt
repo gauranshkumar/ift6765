@@ -12,10 +12,11 @@ datasets<=2.19.0
 # the CC vllm wheel will satisfy opencv>=4.11 from that pre-built wheel.
 
 # ── transformers / vllm compatibility ─────────────────────────────────────────
-# Qwen3-VL (qwen3_vl architecture) was added in transformers 4.51.0.
-# vllm 0.8+ rewrote the tokenizer integration and no longer calls the old
-# all_special_tokens_extended attribute — fixing both errors at once.
-transformers>=4.51.0
-
-# vllm 0.8+ has native Qwen3-VL support and works with transformers >=4.51
-vllm>=0.8.0,<0.9.0
+# NOTE: transformers version is pinned per-script, not here, because both
+# scripts need the same floor (>=4.51.1):
+#   - qwen3_vl / Qwen3VLForConditionalGeneration requires transformers >=4.51
+#   - transformers 4.51.0 has a tokenizer bug ('list has no attribute keys')
+#     fixed in 4.51.1; both scripts pin >=4.51.1
+#
+# vllm is available as a CC prebuilt wheel; let --no-index handle version.
+vllm>=0.8.0
