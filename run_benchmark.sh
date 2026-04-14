@@ -25,20 +25,12 @@ echo "=========================================================="
 
 # ── Module loading ────────────────────────────────────────────────────────────
 echo "[INFO] Loading modules..."
-# Purge ALL modules first to evict any user-default modules that SLURM inherits
-# from ~/.bashrc (e.g. an older or newer scipy-stack version).  Then reload
-# scipy-stack explicitly so we control the exact version.
 module --force purge
 module load StdEnv/2023    2>/dev/null || echo "[WARN] StdEnv/2023 not found"
 module load gcc            2>/dev/null || echo "[WARN] gcc not found"
 module load cuda/12.2      2>/dev/null || echo "[WARN] cuda/12.2 not found"
 module load arrow/17.0.0   2>/dev/null || echo "[WARN] arrow/17.0.0 not found"
-# opencv MUST be loaded before venv activation so the CC vllm wheel can satisfy
-# its opencv-python-headless requirement from the system module, not PyPI.
 module load opencv         2>/dev/null || echo "[WARN] opencv not found"
-# CC recommends loading scipy-stack rather than pip-installing scipy/numpy/pandas.
-# Loading it here (after purge) also makes the matching --no-index wheels
-# available so we can install the identical ABI into the venv.
 module load scipy-stack    2>/dev/null || echo "[WARN] scipy-stack not found"
 module load python/3.11    2>/dev/null || echo "[WARN] python/3.11 not found"
 
@@ -48,43 +40,36 @@ echo "[INFO] Building virtual environment -> $ENV_DIR"
 python3 -m venv "$ENV_DIR"
 source "$ENV_DIR/bin/activate"
 
-CONSTRAINTS="/project/def-syriani/gauransh/ift6765/constraints.txt"
-
 pip install --upgrade pip wheel setuptools --quiet
-# Install CC's numpy/scipy/pandas into the venv from the local wheel cache.
-# These are the SAME binaries the loaded scipy-stack module provides, so the
-# ABI is guaranteed to match CC's vllm wheel (also compiled against CC's numpy).
-# Doing this BEFORE vllm prevents pip from pulling a different numpy from PyPI.
-pip install --no-index numpy scipy pandas
-pip install --no-index torch torchvision torchaudio || pip install torch torchvision torchaudio
-pip install --no-index pyarrow || true
 
-# CC provides opencv via the loaded module (entries in PYTHONPATH above), not
-# via a pip-installable wheel.  Newer vllm wheels require
-# opencv-python-headless>=4.13.0; pip falls through to CC's intentionally-
-# failing dummy source tarball.  Stub out the package as a dist-info so pip's
-# resolver sees it as already installed and never touches the dummy tarball.
+# 1. scipy-stack packages — install from CC's local wheels (same binaries the
+#    module provides, so no ABI mismatch with anything else CC compiled).
+pip install --no-index numpy scipy pandas
+
+# 2. opencv — CC blocks pip-install with an intentionally-failing dummy tarball;
+#    the real cv2 is already on PYTHONPATH from the loaded module.
+#    Stub the dist-info so every subsequent pip resolver step sees it as satisfied.
 python3 - <<'PYSTUB'
 import site, os
-dist_info = os.path.join(site.getsitepackages()[0],
-                         "opencv_python_headless-4.13.0.dist-info")
-os.makedirs(dist_info, exist_ok=True)
-open(os.path.join(dist_info, "METADATA"), "w").write(
+di = os.path.join(site.getsitepackages()[0], "opencv_python_headless-4.13.0.dist-info")
+os.makedirs(di, exist_ok=True)
+open(os.path.join(di, "METADATA"),  "w").write(
     "Metadata-Version: 2.1\nName: opencv-python-headless\nVersion: 4.13.0\n")
-open(os.path.join(dist_info, "INSTALLER"), "w").write("pip\n")
-open(os.path.join(dist_info, "RECORD"),   "w").write("")
-print(f"[stub] opencv-python-headless 4.13.0 stubbed at {dist_info}")
+open(os.path.join(di, "INSTALLER"), "w").write("pip\n")
+open(os.path.join(di, "RECORD"),    "w").write("")
+print(f"[stub] opencv-python-headless 4.13.0 → {di}")
 PYSTUB
 
-pip install --no-index vllm || pip install -c "$CONSTRAINTS" vllm
-pip install -c "$CONSTRAINTS" peft accelerate pillow python-dotenv
-# qwen3_vl / Qwen3VLForConditionalGeneration requires transformers >=4.51.
-# 4.51.0 has a tokenizer regression ('list has no attribute keys'); fixed in 4.51.1.
-# Force-reinstall AFTER vllm so its transitive dep resolution cannot override the pin.
-# Pin to 4.51.x: 4.51.0 has the 'list has no attribute keys' tokenizer bug
-# (fixed in 4.51.1); cap below 4.52 to avoid API changes that could break
-# vLLM 0.8.x which was written against transformers 4.47-4.50.
-pip install --force-reinstall "transformers>=4.51.1,<4.52.0"
+# 3. torch — must come from CC's local wheel (CUDA-compiled for CC hardware).
+pip install --no-index torch torchvision torchaudio || pip install torch torchvision torchaudio
+
+# 4. pyarrow — must come from CC's local wheel (linked against arrow/17.0.0 module).
+pip install --no-index pyarrow || true
+
+# 5. vllm + everything else — latest from PyPI.
+#    Latest vllm natively supports Qwen3-VL and is written for current transformers,
+#    eliminating all the version-pinning and monkey-patching we needed with 0.8.x.
+pip install vllm transformers peft accelerate pillow python-dotenv
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 PROJECT_DIR="/project/def-syriani/gauransh/ift6765"
