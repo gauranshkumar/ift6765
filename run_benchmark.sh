@@ -91,6 +91,32 @@ else
     echo "[INFO] Using existing merged model at $FINETUNED_MODEL"
 fi
 
+# ── Step 1b: Fix finetuned tokenizer config ───────────────────────────────────
+# finetune_vlm.py saves extra_special_tokens as a list [] via
+# processor.save_pretrained().  Current transformers expects a dict {}, so the
+# vLLM server crashes with:
+#   AttributeError: 'list' object has no attribute 'keys'
+# Patch it once in-place; idempotent if already a dict.
+FINETUNED_MODEL="$FINETUNED_MODEL" python3 - <<'TOKFIX'
+import json, pathlib, sys, os
+cfg_path = pathlib.Path(os.environ["FINETUNED_MODEL"]) / "tokenizer_config.json"
+if not cfg_path.exists():
+    print(f"[tokfix] {cfg_path} not found — skipping"); sys.exit(0)
+cfg = json.loads(cfg_path.read_text())
+if isinstance(cfg.get("extra_special_tokens"), list):
+    # transformers 4.51+ calls .keys() on extra_special_tokens expecting a dict.
+    # The tokens themselves (<|vision_start|>, <|image_pad|>, etc.) are NOT lost —
+    # they remain registered in added_tokens.json / tokenizer.json and are fully
+    # functional for encoding/decoding.  extra_special_tokens is only used to
+    # expose tokens as Python attributes (tokenizer.im_start_token etc.) which
+    # vLLM does not rely on.  Remove the field so transformers skips the dict path.
+    del cfg["extra_special_tokens"]
+    cfg_path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+    print(f"[tokfix] Removed extra_special_tokens list from {cfg_path}")
+else:
+    print(f"[tokfix] extra_special_tokens already correct in {cfg_path}")
+TOKFIX
+
 # ── Helper: start vLLM, wait for health, run benchmark, stop ─────────────────
 # Usage: run_model_benchmark <model_path_or_id> <served_name> <results_parquet> <log_file>
 run_model_benchmark() {
@@ -167,17 +193,18 @@ run_model_benchmark() {
     return $BENCH_EXIT
 }
 
-# ── Step 2: Benchmark base model ─────────────────────────────────────────────
-VLLM_LOG_BASE="/scratch/gauransh/logs/vllm_base_${SLURM_JOB_ID:-local}.log"
-set +e
-run_model_benchmark \
-    "$BASE_MODEL" \
-    "base" \
-    "$RESULTS_BASE" \
-    "$VLLM_LOG_BASE"
-EXIT_BASE=$?
-set -e
-echo "[INFO] Base model benchmark exit code: $EXIT_BASE"
+# ── Step 2: Benchmark base model (already done — skipped) ────────────────────
+# VLLM_LOG_BASE="/scratch/gauransh/logs/vllm_base_${SLURM_JOB_ID:-local}.log"
+# set +e
+# run_model_benchmark \
+#     "$BASE_MODEL" \
+#     "base" \
+#     "$RESULTS_BASE" \
+#     "$VLLM_LOG_BASE"
+# EXIT_BASE=$?
+# set -e
+# echo "[INFO] Base model benchmark exit code: $EXIT_BASE"
+EXIT_BASE=0
 
 # ── Step 3: Benchmark finetuned model ────────────────────────────────────────
 VLLM_LOG_FT="/scratch/gauransh/logs/vllm_finetuned_${SLURM_JOB_ID:-local}.log"
