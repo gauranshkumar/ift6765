@@ -481,7 +481,7 @@ def main():
     parser.add_argument("--base",          required=True, help="benchmark_results_base.parquet")
     parser.add_argument("--finetuned",     required=True, help="benchmark_results_finetuned.parquet")
     parser.add_argument("--ground-truth",  required=True,
-                        help="qwen_lora_test_split.parquet with uml_code column")
+                        help="qwen_lora_test_split.parquet — supports uml_code column or messages column (assistant turn)")
     parser.add_argument("--output-dir", default="./analysis_output",
                         help="Directory to save figures and CSV (default: ./analysis_output)")
     parser.add_argument("--no-plots",   action="store_true", help="Skip figure generation")
@@ -494,9 +494,38 @@ def main():
     log.info(f"Loading ground truth:        {args.ground_truth}")
     gt_df = pd.read_parquet(args.ground_truth)
     log.info(f"Ground truth: {len(gt_df)} rows | columns: {gt_df.columns.tolist()}")
-    if "uml_code" not in gt_df.columns:
-        raise ValueError(f"'uml_code' column not found in ground truth. Available: {gt_df.columns.tolist()}")
-    gt_codes = gt_df["uml_code"].fillna("").reset_index(drop=True)
+
+    if "uml_code" in gt_df.columns:
+        gt_codes = gt_df["uml_code"].fillna("").reset_index(drop=True)
+        log.info("Ground truth source: uml_code column")
+    elif "messages" in gt_df.columns:
+        # finetune format — extract assistant turn from messages
+        def _extract_gt(messages) -> str:
+            if not isinstance(messages, list):
+                return ""
+            for msg in messages:
+                if not isinstance(msg, dict) or msg.get("role") != "assistant":
+                    continue
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    return content
+                if isinstance(content, list):
+                    for part in content:
+                        if isinstance(part, dict) and part.get("type") == "text":
+                            return part.get("text", "")
+            return ""
+        gt_codes = gt_df["messages"].apply(_extract_gt).fillna("").reset_index(drop=True)
+        log.info("Ground truth source: assistant turn in messages column")
+        n_empty = (gt_codes == "").sum()
+        if n_empty:
+            log.warning(f"{n_empty} rows had no assistant message — they will score 0")
+    else:
+        raise ValueError(
+            f"No 'uml_code' or 'messages' column in ground truth. "
+            f"Available: {gt_df.columns.tolist()}"
+        )
+
+    log.info(f"GT sample: {gt_codes.iloc[0][:120]!r}")
 
     # ── load benchmarks and inject ground truth ───────────────────────────────
     log.info(f"Loading base benchmark:      {args.base}")
